@@ -1,0 +1,21 @@
+{
+  "status": "success",
+  "timestamp": "2025-04-29T17:51:04Z",
+  "metadata": {
+    "request_id": "chatcmpl-64f69938c7884e7c9ae5db0db6db73e6",
+    "model": "meta-llama/Meta-Llama-3.1-70B-Instruct",
+    "provider": "nebius",
+    "response_type": "text",
+    "latency_ms": 0
+  },
+  "response": {
+    "type": "text",
+    "output": "Here are three ways to improve productivity:\n\n1. **Set Clear Goals and Priorities**: Before starting your work, define what needs to be accomplished and prioritize your tasks. Try to focus on the most important and urgent tasks first, and break them down into smaller, manageable chunks. This will help you stay focused and avoid procrastination. Use tools like to-do lists, calendars, or project management software to help you stay organized and on track.\n2. **Eliminate Distractions and Minimize Multitasking**: Identify common distractions that prevent you from focusing, such as social media, email, or chatty coworkers. Find ways to minimize these distractions, such as turning off notifications, finding a quiet workspace, or using a tool like a website blocker. Additionally, try to focus on a single task at a time, rather than multitasking. Research has shown that multitasking can actually decrease productivity and increase stress.\n3. **Use Time-Management Techniques**: Implement time-management techniques like the Pomodoro Technique, which involves working in focused 25-minute increments, followed by a 5-minute break. This can help you stay focused and avoid burnout. You can also try using a \"time box\" approach, where you schedule a specific amount of time for a task, and challenge yourself to complete it within that timeframe.\n\nRemember, everyone is different, and what works for one person may not work for another. Experiment with different techniques to find what works best for you and your productivity style"
+  },
+  "usage": {
+    "input_tokens": 18,
+    "output_tokens": 300,
+    "total_tokens": 318
+  },
+  "error": null
+}

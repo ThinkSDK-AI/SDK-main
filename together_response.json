@@ -1,0 +1,21 @@
+{
+  "status": "success",
+  "timestamp": "2025-04-29T17:50:54Z",
+  "metadata": {
+    "request_id": "ns2nnCk-4yUbBN-937ec17cd80020c5",
+    "model": "Qwen/Qwen2.5-72B-Instruct-Turbo",
+    "provider": "together",
+    "response_type": "text",
+    "latency_ms": 0
+  },
+  "response": {
+    "type": "text",
+    "output": "Sure! Quantum computing is a type of computing that uses the principles of quantum mechanics to process information in a fundamentally different way from traditional computing.\n\n### Traditional Computing:\n- **Bits**: In traditional computing, the basic unit of information is a **bit**, which can be either a 0 or a 1. Think of it like a light switch that can be either off (0) or on (1).\n- **Operations**: Traditional computers perform operations by manipulating these bits using logical gates (like AND, OR, NOT).\n\n### Quantum Computing:\n- **Qubits**: In quantum computing, the basic unit of information is a **qubit**. A qubit can be in a state of 0, 1, or any combination of both at the same time. This is called **superposition**. Imagine a light switch that can be off, on, or both at the same time.\n- **Superposition**: Because qubits can be in multiple states simultaneously, a quantum computer can process a vast amount of possibilities all at once.\n- **Entanglement**: Another key principle is **entanglement**, where two qubits can be linked in such a way that the state of one qubit instantly affects the state of the other, no matter how far apart they are. This allows quantum computers to perform certain calculations much more efficiently.\n- **Quantum Gates**: Quantum computers use **quantum gates** to manipulate qubits and perform operations. These gates can change the state of"
+  },
+  "usage": {
+    "input_tokens": 37,
+    "output_tokens": 300,
+    "total_tokens": 337
+  },
+  "error": null
+}
