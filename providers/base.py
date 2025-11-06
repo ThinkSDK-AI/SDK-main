@@ -1,6 +1,9 @@
 from typing import Dict, Any, Optional, List, Callable
 from models import ChatCompletionRequest, Tool
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 class BaseProvider:
     """Base class for all providers with tool calling functionality."""
@@ -90,5 +93,5 @@ If you don't need to use any tools, respond normally with a regular text message
             
             return response
         except Exception as e:
-            print(f"Error processing response: {e}")
+            logger.error(f"Error processing response: {e}", exc_info=True)
             return response 

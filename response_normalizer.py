@@ -3,7 +3,10 @@ import json
 import re
 import time
 import uuid
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 class ResponseNormalizer:
     """Normalizes responses from different providers into a standard format."""
@@ -105,7 +108,7 @@ class ResponseNormalizer:
                         }
                     }
         except Exception as e:
-            print(f"Error normalizing Meta response: {e}")
+            logger.error(f"Error normalizing Meta response: {e}", exc_info=True)
         
         # Return original response if no tool data found
         return response
@@ -166,7 +169,7 @@ class ResponseNormalizer:
                     "references": references
                 }
         except Exception as e:
-            print(f"Error normalizing Perplexity response: {e}")
+            logger.error(f"Error normalizing Perplexity response: {e}", exc_info=True)
         
         # Return original response if no tool data found
         return response
@@ -232,7 +235,7 @@ class ResponseNormalizer:
                         }
                     }
         except Exception as e:
-            print(f"Error normalizing OpenAI response: {e}")
+            logger.error(f"Error normalizing OpenAI response: {e}", exc_info=True)
         
         # Return original response if no tool data found
         return response
@@ -293,7 +296,7 @@ class ResponseNormalizer:
                         }
                     }
         except Exception as e:
-            print(f"Error normalizing Anthropic response: {e}")
+            logger.error(f"Error normalizing Anthropic response: {e}", exc_info=True)
         
         # Return original response if no tool data found
         return response
@@ -346,7 +349,7 @@ class ResponseNormalizer:
                         }
                     }
         except Exception as e:
-            print(f"Error normalizing Together response: {e}")
+            logger.error(f"Error normalizing Together response: {e}", exc_info=True)
         
         # Return original response if no tool data found
         return response
@@ -431,7 +434,7 @@ class ResponseNormalizer:
                     }
                 }
         except Exception as e:
-            print(f"Error in generic normalizer: {e}")
+            logger.error(f"Error in generic normalizer: {e}", exc_info=True)
         
         # Return original response if no tool data found
         return response

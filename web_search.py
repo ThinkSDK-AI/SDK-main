@@ -4,18 +4,24 @@ from bs4 import BeautifulSoup
 import urllib.parse
 import time
 import random
+import logging
+from constants import (
+    USER_AGENTS,
+    HTTP_TIMEOUT_SECONDS,
+    WEB_SEARCH_DEFAULT_NUM_RESULTS,
+    WEB_SEARCH_DEFAULT_MAX_CHARS,
+    WEB_SEARCH_DELAY_SECONDS,
+    WEB_SEARCH_RATE_LIMIT_DELAY,
+    WEB_SEARCH_MAX_CHARS_PER_RESULT
+)
+
+logger = logging.getLogger(__name__)
 
 class WebSearch:
     """Handles web search functionality and content extraction from webpages."""
     
-    USER_AGENTS = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15",
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
-    ]
-    
     @staticmethod
-    def search_duckduckgo(query: str, num_results: int = 5) -> List[Dict[str, str]]:
+    def search_duckduckgo(query: str, num_results: int = WEB_SEARCH_DEFAULT_NUM_RESULTS) -> List[Dict[str, str]]:
         """
         Search DuckDuckGo for the given query and return top results.
         
@@ -33,7 +39,7 @@ class WebSearch:
         search_url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
         
         headers = {
-            "User-Agent": random.choice(WebSearch.USER_AGENTS),
+            "User-Agent": random.choice(USER_AGENTS),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
             "Referer": "https://duckduckgo.com/",
@@ -43,7 +49,7 @@ class WebSearch:
         }
         
         try:
-            response = requests.get(search_url, headers=headers, timeout=10)
+            response = requests.get(search_url, headers=headers, timeout=HTTP_TIMEOUT_SECONDS)
             response.raise_for_status()
             
             soup = BeautifulSoup(response.text, "html.parser")
@@ -83,16 +89,16 @@ class WebSearch:
                 
                 # Avoid rate limiting
                 if len(search_results) < num_results:
-                    time.sleep(0.2)
+                    time.sleep(WEB_SEARCH_RATE_LIMIT_DELAY)
             
             return search_results
             
         except Exception as e:
-            print(f"Search error: {str(e)}")
+            logger.error(f"Search error: {str(e)}", exc_info=True)
             return []
     
     @staticmethod
-    def extract_content(url: str, max_chars: int = 8000) -> str:
+    def extract_content(url: str, max_chars: int = WEB_SEARCH_DEFAULT_MAX_CHARS) -> str:
         """
         Extract and clean text content from a URL.
         
@@ -104,7 +110,7 @@ class WebSearch:
             str: Extracted content
         """
         headers = {
-            "User-Agent": random.choice(WebSearch.USER_AGENTS),
+            "User-Agent": random.choice(USER_AGENTS),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
             "DNT": "1",
@@ -113,7 +119,7 @@ class WebSearch:
         }
         
         try:
-            response = requests.get(url, headers=headers, timeout=10)
+            response = requests.get(url, headers=headers, timeout=HTTP_TIMEOUT_SECONDS)
             response.raise_for_status()
             
             # Parse HTML content
@@ -142,7 +148,7 @@ class WebSearch:
             return f"Failed to extract content: {str(e)}"
     
     @staticmethod
-    def search_and_extract(query: str, num_results: int = 5, max_chars_per_result: int = 4000) -> Dict[str, Any]:
+    def search_and_extract(query: str, num_results: int = WEB_SEARCH_DEFAULT_NUM_RESULTS, max_chars_per_result: int = WEB_SEARCH_MAX_CHARS_PER_RESULT) -> Dict[str, Any]:
         """
         Search for the query and extract content from found URLs.
         
@@ -164,7 +170,7 @@ class WebSearch:
             result["content"] = extracted_content
             
             # Add small delay between requests
-            time.sleep(0.5)
+            time.sleep(WEB_SEARCH_DELAY_SECONDS)
         
         return {
             "query": query,

@@ -2,6 +2,19 @@ from typing import Dict, Any, Optional
 from models import ChatCompletionRequest, Tool
 from .base import BaseProvider
 import json
+import logging
+from constants import (
+    PERPLEXITY_DEFAULT_MODEL,
+    PERPLEXITY_DEFAULT_TEMPERATURE,
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_TOP_P,
+    PERPLEXITY_DEFAULT_TOP_K,
+    PERPLEXITY_DEFAULT_PRESENCE_PENALTY,
+    PERPLEXITY_DEFAULT_FREQUENCY_PENALTY,
+    PERPLEXITY_SEARCH_RECENCY_FILTER
+)
+
+logger = logging.getLogger(__name__)
 
 class PerplexityProvider(BaseProvider):
     """Provider implementation for Perplexity API."""
@@ -30,19 +43,19 @@ class PerplexityProvider(BaseProvider):
         
         # Create Perplexity-specific payload
         perplexity_payload = {
-            "model": payload.get("model", "sonar"),
+            "model": payload.get("model", PERPLEXITY_DEFAULT_MODEL),
             "messages": messages,
-            "max_tokens": payload.get("max_tokens", 123),
-            "temperature": payload.get("temperature", 0.2),
-            "top_p": payload.get("top_p", 0.9),
+            "max_tokens": payload.get("max_tokens", DEFAULT_MAX_TOKENS),
+            "temperature": payload.get("temperature", PERPLEXITY_DEFAULT_TEMPERATURE),
+            "top_p": payload.get("top_p", DEFAULT_TOP_P),
             "search_domain_filter": ["wikipedia.org"],
             "return_images": False,
             "return_related_questions": False,
-            "search_recency_filter": "month",
-            "top_k": 0,
+            "search_recency_filter": PERPLEXITY_SEARCH_RECENCY_FILTER,
+            "top_k": PERPLEXITY_DEFAULT_TOP_K,
             "stream": False,
-            "presence_penalty": 0,
-            "frequency_penalty": 1,
+            "presence_penalty": PERPLEXITY_DEFAULT_PRESENCE_PENALTY,
+            "frequency_penalty": PERPLEXITY_DEFAULT_FREQUENCY_PENALTY,
             "response_format": {
                 "type": "text"
             },
@@ -121,7 +134,7 @@ If you don't need to use any tools, respond normally with a regular text message
         """Process the response from Perplexity API."""
         try:
             if "error" in response:
-                print(f"Perplexity Error: {response['error']}")
+                logger.error(f"Perplexity Error: {response['error']}")
                 return response
             
             if "choices" in response:
@@ -152,5 +165,5 @@ If you don't need to use any tools, respond normally with a regular text message
             
             return super().process_response(response)
         except Exception as e:
-            print(f"Error processing Perplexity response: {e}")
+            logger.error(f"Error processing Perplexity response: {e}", exc_info=True)
             return response 
