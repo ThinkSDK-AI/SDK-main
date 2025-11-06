@@ -1,4 +1,4 @@
-from think import Think
+from fourier import Fourier
 import os
 from dotenv import load_dotenv
 import sys
@@ -33,7 +33,7 @@ def get_weather(location: str, unit: str = "celsius") -> str:
 def test_groq():
     """Test Groq provider"""
     print("\n=== Testing Groq Provider ===")
-    client = Think(
+    client = Fourier(
         api_key=os.getenv("GROQ_API_KEY"),
         provider="groq"
     )
@@ -66,7 +66,7 @@ def test_groq():
 def test_together_with_tools():
     """Test Together AI provider with tool calling"""
     print("\n=== Testing Together AI Provider with Tools ===")
-    client = Think(
+    client = Fourier(
         api_key=os.getenv("TOGETHER_API_KEY"),
         provider="together"
     )
@@ -148,7 +148,7 @@ def test_together_with_tools():
 def test_nebius_with_tools():
     """Test Nebius Cloud provider with tool calling"""
     print("\n=== Testing Nebius Cloud Provider with Tools ===")
-    client = Think(
+    client = Fourier(
         api_key=os.getenv("NEBIUS_API_KEY"),
         provider="nebius"
     )
@@ -196,7 +196,7 @@ def test_nebius_with_tools():
 def test_anthropic_with_tools():
     """Test Anthropic provider with tool calling"""
     print("\n=== Testing Anthropic Provider with Tools ===")
-    client = Think(
+    client = Fourier(
         api_key=os.getenv("ANTHROPIC_API_KEY"),
         provider="anthropic"
     )
@@ -241,7 +241,7 @@ def test_anthropic_with_tools():
 def test_perplexity_with_tools():
     """Test Perplexity provider with tool calling"""
     print("\n=== Testing Perplexity Provider with Tools ===")
-    client = Think(
+    client = Fourier(
         api_key=os.getenv("PERPLEXITY_API_KEY"),
         provider="perplexity"
     )
