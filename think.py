@@ -1,8 +1,14 @@
-from typing import List, Optional, Dict, Any, Union
-from pydantic import BaseModel, Field
+"""
+ThinkSDK - Unified LLM Provider Interface
+
+This module provides the main Think class for interacting with multiple LLM providers
+through a standardized interface.
+"""
+
+from typing import List, Optional, Dict, Any
 import requests
 import json
-import re
+import logging
 from models import ChatCompletionRequest, Tool
 from providers import (
     GroqProvider,
@@ -12,242 +18,53 @@ from providers import (
     AnthropicProvider,
     PerplexityProvider
 )
+from response_normalizer import ResponseNormalizer
+from web_search import WebSearch
+from exceptions import (
+    InvalidAPIKeyError,
+    UnsupportedProviderError,
+    ProviderAPIError,
+    InvalidRequestError
+)
 
-class ResponseNormalizer:
-    """Normalizes responses from different providers into a standard format."""
-    
-    @staticmethod
-    def normalize(response: Dict[str, Any], provider: str) -> Dict[str, Any]:
-        """
-        Normalize a response from a specific provider into a standard format.
-        
-        Args:
-            response (Dict[str, Any]): The raw response from the provider
-            provider (str): The provider name
-            
-        Returns:
-            Dict[str, Any]: Normalized response with standardized tool data
-        """
-        normalizer_map = {
-            "meta": ResponseNormalizer._normalize_meta_response,
-            "llama": ResponseNormalizer._normalize_meta_response,  # Same format as Meta
-            "anthropic": ResponseNormalizer._normalize_anthropic_response,
-            "perplexity": ResponseNormalizer._normalize_perplexity_response,
-            "openai": ResponseNormalizer._normalize_openai_response,
-            "groq": ResponseNormalizer._normalize_groq_response,
-            "together": ResponseNormalizer._normalize_together_response,
-            "nebius": ResponseNormalizer._normalize_nebius_response,
-        }
-        
-        # Get the appropriate normalizer function for this provider
-        normalizer = normalizer_map.get(provider.lower(), ResponseNormalizer._normalize_generic_response)
-        return normalizer(response)
-    
-    @staticmethod
-    def _normalize_meta_response(response: Dict[str, Any]) -> Dict[str, Any]:
-        """Normalize Meta/Llama response"""
-        try:
-            if "choices" in response and len(response["choices"]) > 0:
-                choice = response["choices"][0]
-                if "message" in choice and "content" in choice["message"]:
-                    content = choice["message"]["content"]
-                    
-                    # Try to extract JSON from the content
-                    tool_data = ResponseNormalizer._extract_json(content)
-                    if tool_data and "tool" in tool_data and "parameters" in tool_data:
-                        # Return standardized tool response
-                        return {
-                            "tool": tool_data["tool"],
-                            "parameters": tool_data["parameters"]
-                        }
-        except Exception as e:
-            print(f"Error normalizing Meta response: {e}")
-        
-        # Return original response if no tool data found
-        return response
-    
-    @staticmethod
-    def _normalize_perplexity_response(response: Dict[str, Any]) -> Dict[str, Any]:
-        """Normalize Perplexity response"""
-        try:
-            if "choices" in response and len(response["choices"]) > 0:
-                message = response["choices"][0]["message"]
-                content = message["content"]
-                
-                # Try to find JSON in the content
-                # First check for markdown code blocks
-                json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", content)
-                if json_match:
-                    json_str = json_match.group(1).strip()
-                    tool_data = json.loads(json_str)
-                else:
-                    # Try to parse the entire content as JSON
-                    tool_data = ResponseNormalizer._extract_json(content)
-                
-                if tool_data and "tool" in tool_data and "parameters" in tool_data:
-                    # Return standardized tool response
-                    return {
-                        "tool": tool_data["tool"],
-                        "parameters": tool_data["parameters"]
-                    }
-        except Exception as e:
-            print(f"Error normalizing Perplexity response: {e}")
-        
-        # Return original response if no tool data found
-        return response
-    
-    @staticmethod
-    def _normalize_openai_response(response: Dict[str, Any]) -> Dict[str, Any]:
-        """Normalize OpenAI response"""
-        try:
-            if "choices" in response and len(response["choices"]) > 0:
-                choice = response["choices"][0]
-                
-                # Check if there are tool calls in the response
-                if "message" in choice and "tool_calls" in choice["message"] and choice["message"]["tool_calls"]:
-                    tool_call = choice["message"]["tool_calls"][0]
-                    if "function" in tool_call:
-                        # Return standardized tool response
-                        return {
-                            "tool": tool_call["function"]["name"],
-                            "parameters": json.loads(tool_call["function"]["arguments"])
-                        }
-                
-                # If no tool_calls, try to extract from content
-                if "message" in choice and "content" in choice["message"]:
-                    content = choice["message"]["content"]
-                    tool_data = ResponseNormalizer._extract_json(content)
-                    if tool_data and "tool" in tool_data and "parameters" in tool_data:
-                        return {
-                            "tool": tool_data["tool"],
-                            "parameters": tool_data["parameters"]
-                        }
-        except Exception as e:
-            print(f"Error normalizing OpenAI response: {e}")
-        
-        # Return original response if no tool data found
-        return response
-    
-    @staticmethod
-    def _normalize_anthropic_response(response: Dict[str, Any]) -> Dict[str, Any]:
-        """Normalize Anthropic response"""
-        try:
-            if "content" in response and len(response["content"]) > 0:
-                for content_item in response["content"]:
-                    if content_item["type"] == "text":
-                        tool_data = ResponseNormalizer._extract_json(content_item["text"])
-                        if tool_data and "tool" in tool_data and "parameters" in tool_data:
-                            return {
-                                "tool": tool_data["tool"],
-                                "parameters": tool_data["parameters"]
-                            }
-                    elif content_item["type"] == "tool_use":
-                        return {
-                            "tool": content_item["name"],
-                            "parameters": content_item["input"]
-                        }
-        except Exception as e:
-            print(f"Error normalizing Anthropic response: {e}")
-        
-        # Return original response if no tool data found
-        return response
-    
-    @staticmethod
-    def _normalize_groq_response(response: Dict[str, Any]) -> Dict[str, Any]:
-        """Normalize Groq response"""
-        # Similar to OpenAI format
-        return ResponseNormalizer._normalize_openai_response(response)
-    
-    @staticmethod
-    def _normalize_together_response(response: Dict[str, Any]) -> Dict[str, Any]:
-        """Normalize Together response"""
-        # Handle Together-specific format, fallback to generic
-        return ResponseNormalizer._normalize_generic_response(response)
-    
-    @staticmethod
-    def _normalize_nebius_response(response: Dict[str, Any]) -> Dict[str, Any]:
-        """Normalize Nebius response"""
-        # Handle Nebius-specific format, fallback to generic
-        return ResponseNormalizer._normalize_generic_response(response)
-    
-    @staticmethod
-    def _normalize_generic_response(response: Dict[str, Any]) -> Dict[str, Any]:
-        """Generic response normalizer for providers without specific handling"""
-        try:
-            # Try to extract tool data from common response patterns
-            if "choices" in response and len(response["choices"]) > 0:
-                choice = response["choices"][0]
-                if "message" in choice and "content" in choice["message"]:
-                    content = choice["message"]["content"]
-                    tool_data = ResponseNormalizer._extract_json(content)
-                    if tool_data and "tool" in tool_data and "parameters" in tool_data:
-                        return {
-                            "tool": tool_data["tool"],
-                            "parameters": tool_data["parameters"]
-                        }
-            
-            # Try direct content
-            if "content" in response:
-                tool_data = ResponseNormalizer._extract_json(response["content"])
-                if tool_data and "tool" in tool_data and "parameters" in tool_data:
-                    return {
-                        "tool": tool_data["tool"],
-                        "parameters": tool_data["parameters"]
-                    }
-        except Exception as e:
-            print(f"Error in generic normalizer: {e}")
-        
-        # Return original response if no tool data found
-        return response
-    
-    @staticmethod
-    def _extract_json(content: str) -> Optional[Dict[str, Any]]:
-        """Helper method to extract JSON from a string content"""
-        try:
-            # First check if the entire content is valid JSON
-            if content.strip().startswith("{") and content.strip().endswith("}"):
-                return json.loads(content)
-            
-            # Try to extract JSON from markdown code blocks
-            json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", content)
-            if json_match:
-                json_str = json_match.group(1).strip()
-                return json.loads(json_str)
-            
-            # Try to find JSON with regex for more complex content
-            json_match = re.search(r"({[\s\S]*})", content)
-            if json_match:
-                json_str = json_match.group(1).strip()
-                return json.loads(json_str)
-        except (json.JSONDecodeError, IndexError):
-            pass
-        
-        return None
+logger = logging.getLogger(__name__)
 
-class Tool(BaseModel):
-    """Base class for defining tools that can be used by the LLM."""
-    name: str
-    description: str
-    parameters: Dict[str, Any]
-    required: List[str] = Field(default_factory=list)
 
 class Think:
-    """Main class for interacting with LLM providers."""
-    
-    def __init__(self, api_key: str, provider: str = "groq", base_url: Optional[str] = None, **provider_kwargs):
+    """
+    Main class for interacting with LLM providers.
+
+    Provides a unified interface for chat completions across multiple
+    LLM providers with support for tool calling and internet search.
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        provider: str = "groq",
+        base_url: Optional[str] = None,
+        **provider_kwargs
+    ):
         """
         Initialize the Think SDK.
-        
+
         Args:
-            api_key (str): API key for the LLM provider
-            provider (str): Name of the LLM provider (default: "groq")
-            base_url (Optional[str]): Custom base URL for the API
+            api_key: API key for the LLM provider
+            provider: Name of the LLM provider (default: "groq")
+                     Supported: groq, together, nebius, openai, anthropic, perplexity
+            base_url: Custom base URL for the API (optional)
             **provider_kwargs: Additional provider-specific arguments
+
+        Raises:
+            ValueError: If API key is empty or provider is unsupported
         """
+        if not api_key or not api_key.strip():
+            raise InvalidAPIKeyError("API key cannot be empty")
+
         self.api_key = api_key
         self.provider = provider
         self.provider_kwargs = provider_kwargs
-        
+
         # Initialize the appropriate provider
         provider_map = {
             "groq": GroqProvider,
@@ -257,42 +74,116 @@ class Think:
             "anthropic": AnthropicProvider,
             "perplexity": PerplexityProvider
         }
-        
+
         provider_class = provider_map.get(provider.lower())
         if not provider_class:
-            raise ValueError(f"Unsupported provider: {provider}")
-        
+            supported = ", ".join(provider_map.keys())
+            raise UnsupportedProviderError(
+                f"Unsupported provider: {provider}. "
+                f"Supported providers: {supported}"
+            )
+
         self.provider_instance = provider_class(api_key, **provider_kwargs)
         if base_url:
             self.provider_instance.BASE_URL = base_url
-    
+
     def chat(self, **kwargs) -> Dict[str, Any]:
         """
         Create a chat completion.
-        
+
         Args:
-            model (str): The model to use
-            messages (List[Dict[str, str]]): List of message objects
-            temperature (float, optional): Sampling temperature
-            max_tokens (int, optional): Maximum number of tokens to generate
-            top_p (float, optional): Nucleus sampling parameter
-            frequency_penalty (float, optional): Frequency penalty
-            presence_penalty (float, optional): Presence penalty
-            tools (List[Tool], optional): List of tools available to the model
-            tool_choice (str, optional): How the model should use the tools
-            
+            model: The model to use
+            messages: List of message objects with 'role' and 'content' keys
+            temperature: Sampling temperature (optional)
+            max_tokens: Maximum number of tokens to generate (optional)
+            top_p: Nucleus sampling parameter (optional)
+            frequency_penalty: Frequency penalty (optional)
+            presence_penalty: Presence penalty (optional)
+            tools: List of Tool objects available to the model (optional)
+            tool_choice: How the model should use the tools (optional)
+            internet_search: Whether to search the internet for context (optional, default False)
+            search_query: Custom search query (optional, uses last user message if None)
+            search_results: Number of search results to include (optional, default 3)
+
         Returns:
-            Dict[str, Any]: The chat completion response
+            Standardized response dictionary with structure:
+            {
+                "status": "success",
+                "timestamp": "2024-01-01T12:00:00Z",
+                "metadata": {...},
+                "response": {...},
+                "usage": {...},
+                "error": None
+            }
+
+        Raises:
+            requests.HTTPError: If the API request fails
+            ValueError: If required parameters are missing
         """
+        # Handle internet search if enabled
+        internet_search = kwargs.pop("internet_search", False)
+        search_query = kwargs.pop("search_query", None)
+        search_results_count = kwargs.pop("search_results", 3)
+
+        if internet_search:
+            # If no search query is provided, use the last user message
+            if not search_query and "messages" in kwargs:
+                for message in reversed(kwargs["messages"]):
+                    if message.get("role") == "user":
+                        search_query = message.get("content", "")
+                        break
+
+            if search_query:
+                # Perform internet search
+                search_data = WebSearch.search_and_extract(
+                    query=search_query,
+                    num_results=search_results_count,
+                    max_chars_per_result=2000
+                )
+
+                # Format search results as context
+                search_context = WebSearch.format_context_for_llm(search_data)
+
+                # Add system message with search context if not already present
+                system_message_exists = False
+
+                for message in kwargs.get("messages", []):
+                    if message.get("role") == "system":
+                        # Append to existing system message
+                        message["content"] += (
+                            f"\n\nINTERNET SEARCH RESULTS:\n{search_context}\n\n"
+                            "Use the above information to provide a comprehensive answer. "
+                            "Cite sources when using specific information."
+                        )
+                        system_message_exists = True
+                        break
+
+                if not system_message_exists:
+                    # Create new system message with search context
+                    if "messages" not in kwargs:
+                        kwargs["messages"] = []
+
+                    kwargs["messages"].insert(0, {
+                        "role": "system",
+                        "content": (
+                            f"INTERNET SEARCH RESULTS:\n{search_context}\n\n"
+                            "Use the above information to provide a comprehensive answer. "
+                            "Cite sources when using specific information."
+                        )
+                    })
+
         # Convert Tool objects to dictionaries if they are not already
         if 'tools' in kwargs and kwargs['tools'] is not None:
-            kwargs['tools'] = [tool.model_dump() if hasattr(tool, 'model_dump') else tool for tool in kwargs['tools']]
-        
+            kwargs['tools'] = [
+                tool.model_dump() if hasattr(tool, 'model_dump') else tool
+                for tool in kwargs['tools']
+            ]
+
         request = ChatCompletionRequest(**kwargs)
-        
+
         # Prepare the request payload using the provider
         payload = self.provider_instance.prepare_request(request)
-        
+
         # If the provider doesn't support tool calling, append tool details to the system prompt
         if not hasattr(self.provider_instance, 'supports_tool_calling') or not self.provider_instance.supports_tool_calling:
             tool_descriptions = "\n".join([
@@ -305,41 +196,116 @@ class Think:
                     "content": f"Available tools:\n{tool_descriptions}"
                 }
                 payload["messages"].insert(0, system_message)
-        
+
         # Make the API request using the provider's endpoint and headers
-        response = requests.post(
-            self.provider_instance.get_chat_completion_endpoint(),
-            json=payload,
-            headers=self.provider_instance.headers
-        )
-        response.raise_for_status()
-        
+        try:
+            response = requests.post(
+                self.provider_instance.get_chat_completion_endpoint(),
+                json=payload,
+                headers=self.provider_instance.headers
+            )
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            status_code = e.response.status_code if e.response else None
+            error_msg = str(e)
+            if e.response:
+                try:
+                    error_data = e.response.json()
+                    error_msg = error_data.get("error", {}).get("message", str(e))
+                except:
+                    pass
+            raise ProviderAPIError(error_msg, self.provider, status_code) from e
+        except requests.RequestException as e:
+            logger.error(f"Network error when calling {self.provider} API: {e}", exc_info=True)
+            raise ProviderAPIError(f"Network error: {str(e)}", self.provider) from e
+
         # Get the raw response
         raw_response = response.json()
-        
-        # Normalize the response to extract tool data consistently
-        normalized_response = ResponseNormalizer.normalize(raw_response, self.provider)
-        
-        # Check if the normalized response contains tool data
-        if isinstance(normalized_response, dict) and "tool" in normalized_response and "parameters" in normalized_response:
-            # If a tool is called, it's already in the standardized format
-            return normalized_response
-        
-        # Otherwise return the provider-processed response
-        return self.provider_instance.process_response(raw_response)
-    
-    def create_tool(self, name: str, description: str, parameters: Dict[str, Any], required: List[str] = None) -> Tool:
+
+        # Use the ResponseNormalizer to create standardized JSON response
+        standardized_response = ResponseNormalizer.normalize(raw_response, self.provider)
+
+        # If the standardized response contains tool data and we have a registered tool,
+        # we can optionally execute the tool
+        if (standardized_response.get("metadata", {}).get("response_type") == "tool_call" and
+            hasattr(self.provider_instance, "tools") and
+            standardized_response.get("response", {}).get("tool_used") in self.provider_instance.tools):
+
+            tool_name = standardized_response["response"]["tool_used"]
+            tool_params = standardized_response["response"]["tool_parameters"]
+
+            try:
+                # Execute the tool
+                tool_result = self.provider_instance.execute_tool(tool_name, tool_params)
+
+                # Update the tool execution output
+                standardized_response["response"]["tool_execution_output"] = tool_result
+            except Exception as e:
+                # If tool execution fails, add error info
+                standardized_response["response"]["tool_execution_error"] = str(e)
+
+        # If internet search was performed, add search metadata to the response
+        if internet_search and search_query:
+            if "response" not in standardized_response:
+                standardized_response["response"] = {}
+
+            standardized_response["response"]["search_metadata"] = {
+                "query": search_query,
+                "num_results": search_results_count,
+                "engine": "duckduckgo"
+            }
+
+            # Add citations directly to standardized response
+            if ("results" in search_data and len(search_data["results"]) > 0 and
+                "type" in standardized_response.get("response", {}) and
+                standardized_response["response"]["type"] == "text"):
+
+                citations = []
+                for result in search_data["results"]:
+                    citations.append({
+                        "url": result.get("url", ""),
+                        "title": result.get("title", ""),
+                        "snippet": result.get("snippet", "")
+                    })
+
+                standardized_response["response"]["citations"] = citations
+
+        return standardized_response
+
+    def create_tool(
+        self,
+        name: str,
+        description: str,
+        parameters: Dict[str, Any],
+        required: Optional[List[str]] = None
+    ) -> Tool:
         """
         Create a new tool definition.
-        
+
         Args:
-            name (str): Name of the tool
-            description (str): Description of what the tool does
-            parameters (Dict[str, Any]): Tool parameters schema
-            required (List[str], optional): List of required parameters
-            
+            name: Name of the tool
+            description: Description of what the tool does
+            parameters: Tool parameters schema (JSON Schema format)
+            required: List of required parameter names (optional)
+
         Returns:
-            Tool: The created tool definition
+            Tool object that can be passed to the chat() method
+
+        Example:
+            >>> think = Think(api_key="...", provider="groq")
+            >>> calculator = think.create_tool(
+            ...     name="calculator",
+            ...     description="Performs basic arithmetic",
+            ...     parameters={
+            ...         "type": "object",
+            ...         "properties": {
+            ...             "operation": {"type": "string"},
+            ...             "a": {"type": "number"},
+            ...             "b": {"type": "number"}
+            ...         }
+            ...     },
+            ...     required=["operation", "a", "b"]
+            ... )
         """
         return Tool(
             name=name,

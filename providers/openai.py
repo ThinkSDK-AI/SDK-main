@@ -15,7 +15,7 @@ class OpenAIProvider:
     
     def prepare_request(self, request: ChatCompletionRequest) -> Dict[str, Any]:
         """Prepare the request payload for OpenAI API."""
-        payload = request.dict(exclude_none=True)
+        payload = request.model_dump(exclude_none=True)
         return payload
     
     def get_chat_completion_endpoint(self) -> str:

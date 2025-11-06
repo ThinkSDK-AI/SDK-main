@@ -2,6 +2,10 @@ from typing import Dict, Any, Optional
 from models import ChatCompletionRequest, Tool
 from .base import BaseProvider
 import json
+import logging
+from constants import ANTHROPIC_DEFAULT_MAX_TOKENS, ANTHROPIC_DEFAULT_MODEL
+
+logger = logging.getLogger(__name__)
 
 class AnthropicProvider(BaseProvider):
     """Provider implementation for Anthropic Claude API."""
@@ -51,8 +55,8 @@ class AnthropicProvider(BaseProvider):
         
         # Update payload with Anthropic-specific fields
         payload["messages"] = messages
-        payload["model"] = payload.get("model", "claude-3-opus-20240229")
-        payload["max_tokens"] = payload.get("max_tokens", 4096)
+        payload["model"] = payload.get("model", ANTHROPIC_DEFAULT_MODEL)
+        payload["max_tokens"] = payload.get("max_tokens", ANTHROPIC_DEFAULT_MAX_TOKENS)
         
         return payload
     
@@ -64,7 +68,7 @@ class AnthropicProvider(BaseProvider):
         """Process the response from Anthropic API."""
         try:
             if "error" in response:
-                print(f"Anthropic Error: {response['error']}")
+                logger.error(f"Anthropic Error: {response['error']}")
                 return response
             
             if "content" in response:
@@ -91,5 +95,5 @@ class AnthropicProvider(BaseProvider):
             
             return super().process_response(response)
         except Exception as e:
-            print(f"Error processing Anthropic response: {e}")
+            logger.error(f"Error processing Anthropic response: {e}", exc_info=True)
             return response 
