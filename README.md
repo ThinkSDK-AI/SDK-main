@@ -10,6 +10,7 @@ A Python SDK for accessing Large Language Models (LLMs) from various inference p
   - [Environment Variables](#environment-variables)
 - [Usage](#usage)
   - [Quick Start](#quick-start)
+  - [Command Line Interface (CLI)](#command-line-interface-cli)
   - [Function Calling](#function-calling)
   - [Internet Search](#internet-search)
   - [Autonomous Agents](#autonomous-agents)
@@ -97,6 +98,109 @@ print(response["response"]["output"])
 usage = response.get("usage", {})
 print(f"Tokens: {usage.get('input_tokens', 0)} in / {usage.get('output_tokens', 0)} out")
 ```
+
+### Command Line Interface (CLI)
+
+FourierSDK includes a comprehensive command-line interface for managing agents, MCP tools, and running queries without writing code.
+
+**Quick Start:**
+
+```bash
+# Quick chat
+python cli.py chat "What is quantum computing?"
+
+# Interactive mode
+python cli.py interactive
+
+# Create an agent
+python cli.py create-agent --name ResearchBot --thinking-mode --save
+
+# Add MCP tools
+python cli.py add-mcp --directory ./mcp_tools --agent ResearchBot
+
+# Run saved agent
+python cli.py run --agent ResearchBot --query "Latest AI developments"
+```
+
+**Interactive Shell:**
+
+```bash
+$ python cli.py interactive
+╔═══════════════════════════════════════════════════════════╗
+║              FourierSDK Interactive Shell                 ║
+║                                                           ║
+║  Type 'help' for commands, 'exit' to quit               ║
+╚═══════════════════════════════════════════════════════════╝
+
+fourier> create-agent
+Agent name: MyAgent
+Provider (groq/openai/anthropic/together) [groq]: groq
+Enable thinking mode? (y/N): y
+✓ Agent 'MyAgent' created
+
+fourier> chat Hello, how can you help?
+Processing...
+
+Hello! I'm your AI assistant. I can help with...
+
+fourier> add-mcp directory ./mcp_tools
+✓ MCP directory added
+
+fourier> list-agents
+Saved Agents:
+  MyAgent
+  ResearchBot
+
+fourier> exit
+```
+
+**Key CLI Commands:**
+
+- `interactive`: Start interactive shell
+- `chat`: Quick one-off queries
+- `create-agent`: Create and save agents
+- `add-mcp`: Add MCP tools (URL, config, directory)
+- `list-agents`: List all saved agents
+- `list-mcp`: List MCP tools
+- `run`: Run saved agent with query
+- `delete-agent`: Delete saved agent
+- `config`: Manage configuration
+
+**Example Workflow:**
+
+```bash
+# 1. Create research agent
+python cli.py create-agent \
+  --name DeepResearch \
+  --thinking-mode \
+  --thinking-depth 3 \
+  --save
+
+# 2. Add MCP tools
+python cli.py add-mcp --directory ./research_tools --agent DeepResearch
+python cli.py add-mcp --url https://mcp.example.com/api --agent DeepResearch
+
+# 3. Run research queries
+python cli.py run \
+  --agent DeepResearch \
+  --query "Analyze quantum computing trends" \
+  --verbose
+
+# 4. List everything
+python cli.py list-agents --details
+python cli.py list-mcp --agent DeepResearch
+```
+
+**Benefits:**
+
+- ✅ **No coding required**: Use FourierSDK from command line
+- ✅ **Agent persistence**: Save and reuse agent configurations
+- ✅ **MCP integration**: Easily manage MCP tools
+- ✅ **Interactive mode**: REPL-style interface
+- ✅ **Scriptable**: Use in bash scripts and automation
+- ✅ **Configuration management**: JSON-based config storage
+
+See [CLI.md](CLI.md) for complete CLI documentation.
 
 ### Function Calling
 
@@ -448,11 +552,14 @@ print(response["response"]["output"])
 
 - **Multi-Provider Support**: Easily switch between Groq, Together AI, OpenAI, Anthropic, Perplexity, and Nebius
 - **Standardized Response Format**: Consistent response structure regardless of the provider
+- **Command Line Interface (CLI)**: Comprehensive CLI for managing agents and MCP tools without writing code
 - **Function Calling**: Define and use functions/tools with JSON schema validation
 - **Internet Search**: Augment LLM responses with up-to-date information from the web
 - **Autonomous Agents**: Create agents that automatically use tools and manage conversations
 - **Thinking Mode**: Deep research capability with automatic multi-query web searches and synthesis
 - **Model Context Protocol (MCP)**: Connect to remote MCP servers, load tools from directories, and use Claude Desktop-compatible configurations
+- **Interactive Shell**: REPL-style interface for agent interaction and management
+- **Agent Persistence**: Save and load agent configurations with JSON storage
 - **Conversation Management**: Built-in conversation history and context management
 - **Customizable Base URLs**: For enterprise deployments or custom endpoints
 - **Token Usage Tracking**: Monitor token consumption across providers
@@ -460,6 +567,7 @@ print(response["response"]["output"])
 - **Error Handling**: Comprehensive exception hierarchy for precise error handling
 - **Logging**: Production-ready logging framework
 - **Configurable Behavior**: Fine-tune agent iterations, timeouts, and error handling
+- **Scriptable**: Use CLI in automation and CI/CD pipelines
 
 ## API Reference
 
