@@ -13,6 +13,7 @@ from fourier import Fourier
 from models import Tool
 from exceptions import ToolExecutionError, InvalidRequestError
 from mcp import MCPClient
+from web_search import web_search
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,15 @@ class AgentConfig:
 
     timeout_seconds: Optional[int] = None
     """Maximum execution time in seconds (None for no limit)."""
+
+    thinking_mode: bool = False
+    """Enable thinking mode for deep research and analysis."""
+
+    thinking_depth: int = 2
+    """Number of research queries to perform in thinking mode (1-5)."""
+
+    thinking_web_search_results: int = 5
+    """Number of web search results to retrieve per query in thinking mode."""
 
 
 class Agent:
@@ -447,6 +457,106 @@ class Agent:
             f"Result: {result}"
         )
 
+    def _perform_thinking_research(self, user_input: str) -> str:
+        """
+        Perform deep research using web search for thinking mode.
+
+        This method conducts multiple web searches to gather comprehensive
+        context and information related to the user's query.
+
+        Args:
+            user_input: The user's input/query
+
+        Returns:
+            Formatted research context string
+
+        Raises:
+            Exception: If research fails and stop_on_error is True
+        """
+        if self.config.verbose:
+            logger.info(f"[Thinking Mode] Starting deep research for: {user_input[:100]}...")
+
+        research_context = []
+
+        # Clamp thinking depth between 1 and 5
+        depth = max(1, min(5, self.config.thinking_depth))
+
+        try:
+            # First, generate research queries based on the user input
+            # Use LLM to generate diverse search queries
+            query_generation_prompt = f"""Given this user question: "{user_input}"
+
+Generate {depth} diverse search queries that would help gather comprehensive information to answer this question.
+Each query should focus on a different aspect or angle of the question.
+
+Return ONLY the queries, one per line, without numbering or explanations."""
+
+            if self.config.verbose:
+                logger.info("[Thinking Mode] Generating research queries...")
+
+            response = self.client.chat(
+                model=self.model,
+                messages=[{"role": "user", "content": query_generation_prompt}],
+                temperature=0.7,
+                max_tokens=500
+            )
+
+            # Extract queries from response
+            queries_text = response.get("response", {}).get("output", "")
+            search_queries = [q.strip() for q in queries_text.split("\n") if q.strip()]
+
+            # Fallback to user input if no queries generated
+            if not search_queries:
+                search_queries = [user_input]
+
+            # Limit to configured depth
+            search_queries = search_queries[:depth]
+
+            if self.config.verbose:
+                logger.info(f"[Thinking Mode] Generated {len(search_queries)} research queries")
+
+            # Perform web searches for each query
+            for i, query in enumerate(search_queries, 1):
+                if self.config.verbose:
+                    logger.info(f"[Thinking Mode] Research query {i}/{len(search_queries)}: {query}")
+
+                try:
+                    # Perform web search
+                    search_results = web_search(
+                        query,
+                        num_results=self.config.thinking_web_search_results
+                    )
+
+                    if search_results:
+                        research_context.append(f"\n=== Research Query {i}: {query} ===\n")
+                        research_context.append(search_results)
+
+                        if self.config.verbose:
+                            logger.info(f"[Thinking Mode] Gathered {len(search_results)} chars of context")
+
+                except Exception as e:
+                    logger.warning(f"[Thinking Mode] Search failed for query '{query}': {e}")
+                    if self.config.stop_on_error:
+                        raise
+
+            # Compile research context
+            if research_context:
+                full_context = "\n".join(research_context)
+
+                if self.config.verbose:
+                    logger.info(f"[Thinking Mode] Research complete: {len(full_context)} total characters")
+
+                return full_context
+            else:
+                logger.warning("[Thinking Mode] No research context gathered")
+                return ""
+
+        except Exception as e:
+            logger.error(f"[Thinking Mode] Research failed: {e}", exc_info=True)
+            if self.config.stop_on_error:
+                raise
+            return ""
+
     def _build_messages(self, user_input: str) -> List[Dict[str, str]]:
         """
         Build the messages array for the LLM request.
@@ -518,8 +628,32 @@ class Agent:
         # Merge kwargs
         request_kwargs = {**self.kwargs, **override_kwargs}
 
+        # Perform thinking mode research if enabled
+        enhanced_input = user_input
+        if self.config.thinking_mode:
+            if self.config.verbose:
+                logger.info("[Thinking Mode] Enabled - performing deep research")
+
+            research_context = self._perform_thinking_research(user_input)
+
+            if research_context:
+                # Enhance the user input with research context
+                enhanced_input = f"""I have gathered the following research context to help answer your question:
+
+{research_context}
+
+---
+
+Based on the above research context, please answer this question:
+{user_input}
+
+Synthesize the information from multiple sources and provide a comprehensive, well-reasoned answer."""
+
+                if self.config.verbose:
+                    logger.info(f"[Thinking Mode] Enhanced input with {len(research_context)} chars of context")
+
         # Build initial messages
-        messages = self._build_messages(user_input)
+        messages = self._build_messages(enhanced_input)
 
         # Track execution
         iterations = 0

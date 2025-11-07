@@ -253,6 +253,39 @@ for step in response['intermediate_steps']:
 - **Configurable Behavior**: Control iterations, error handling, verbosity, and more
 - **Intermediate Steps**: Track what tools were used and when
 - **Error Resilience**: Continue execution even when tools fail
+- **Thinking Mode**: Deep research capability with automatic web searches
+
+**Thinking Mode - Deep Research:**
+
+Agents can enable Thinking Mode to perform deep research before answering queries:
+
+```python
+from agent import Agent, AgentConfig
+
+# Create agent with thinking mode enabled
+agent = Agent(
+    client=client,
+    name="ResearchAgent",
+    model="mixtral-8x7b-32768",
+    config=AgentConfig(
+        thinking_mode=True,              # Enable deep research
+        thinking_depth=2,                # Number of research queries
+        thinking_web_search_results=5,   # Results per query
+        verbose=True
+    )
+)
+
+# Ask a research question - agent will automatically search the web
+response = agent.run("What are the latest developments in quantum computing?")
+print(response["output"])
+```
+
+Thinking Mode automatically:
+1. Generates diverse search queries based on the question
+2. Performs web searches for each query
+3. Gathers and compiles research context
+4. Synthesizes information from multiple sources
+5. Provides comprehensive, well-researched answers
 
 See [AGENT.md](AGENT.md) for complete documentation and advanced examples.
 
@@ -406,6 +439,7 @@ print(response["response"]["output"])
 - **Function Calling**: Define and use functions/tools with JSON schema validation
 - **Internet Search**: Augment LLM responses with up-to-date information from the web
 - **Autonomous Agents**: Create agents that automatically use tools and manage conversations
+- **Thinking Mode**: Deep research capability with automatic multi-query web searches and synthesis
 - **Model Context Protocol (MCP)**: Connect to remote MCP servers, load tools from directories, and use Claude Desktop-compatible configurations
 - **Conversation Management**: Built-in conversation history and context management
 - **Customizable Base URLs**: For enterprise deployments or custom endpoints
