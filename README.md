@@ -13,6 +13,7 @@ A Python SDK for accessing Large Language Models (LLMs) from various inference p
   - [Function Calling](#function-calling)
   - [Internet Search](#internet-search)
   - [Autonomous Agents](#autonomous-agents)
+  - [Model Context Protocol (MCP)](#model-context-protocol-mcp)
   - [Provider-Specific Examples](#provider-specific-examples)
 - [Features](#features)
 - [API Reference](#api-reference)
@@ -255,6 +256,90 @@ for step in response['intermediate_steps']:
 
 See [AGENT.md](AGENT.md) for complete documentation and advanced examples.
 
+### Model Context Protocol (MCP)
+
+FourierSDK includes comprehensive support for the Model Context Protocol (MCP), allowing you to connect your agents and applications to external tools and data sources through a standardized protocol.
+
+**What is MCP?**
+
+The Model Context Protocol is an open protocol that standardizes how AI applications connect with external tools and data sources. It enables seamless integration with:
+
+- Remote MCP servers via HTTP/HTTPS
+- Local MCP servers via subprocess (stdio)
+- Directory-based tool loading
+- Configuration-based tool management
+
+**Quick MCP Example:**
+
+```python
+from fourier import Fourier
+from agent import Agent
+
+# Create agent
+client = Fourier(api_key="...", provider="groq")
+agent = Agent(client=client, model="mixtral-8x7b-32768")
+
+# Register MCP tools from different sources
+agent.register_mcp_url("https://mcp.example.com/api")  # Remote server
+agent.register_mcp_config("./mcp_config.json")         # Config file
+agent.register_mcp_directory("./mcp_tools")            # Local directory
+
+# Agent now has access to all MCP tools
+response = agent.run("Use the available tools to complete this task")
+```
+
+**Three Ways to Connect:**
+
+1. **Remote MCP Server (URL)**:
+   ```python
+   agent.register_mcp_url("https://mcp.example.com/api")
+   ```
+
+2. **Configuration File** (Compatible with Claude Desktop format):
+   ```python
+   agent.register_mcp_config("./mcp_config.json")
+   ```
+
+3. **Local Tool Directories**:
+   ```python
+   agent.register_mcp_directory("./mcp_tools")
+   # Or multiple directories
+   agent.register_mcp_directories(["./tools1", "./tools2", "./tools3"])
+   ```
+
+**Creating MCP Tools:**
+
+Create a tool file in your MCP directory:
+
+```python
+# mcp_tools/calculator/tool.py
+
+def calculate(operation: str, a: float, b: float) -> float:
+    """Perform arithmetic operations."""
+    if operation == "add":
+        return a + b
+    elif operation == "multiply":
+        return a * b
+    return 0
+
+MCP_TOOLS = [{
+    "name": "calculator",
+    "description": "Perform arithmetic operations",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "operation": {"type": "string"},
+            "a": {"type": "number"},
+            "b": {"type": "number"}
+        },
+        "required": ["operation", "a", "b"]
+    },
+    "function": calculate
+}]
+```
+
+See [MCP.md](MCP.md) for complete MCP documentation, configuration formats, and advanced examples.
+
 ### Provider-Specific Examples
 
 #### OpenAI
@@ -321,6 +406,7 @@ print(response["response"]["output"])
 - **Function Calling**: Define and use functions/tools with JSON schema validation
 - **Internet Search**: Augment LLM responses with up-to-date information from the web
 - **Autonomous Agents**: Create agents that automatically use tools and manage conversations
+- **Model Context Protocol (MCP)**: Connect to remote MCP servers, load tools from directories, and use Claude Desktop-compatible configurations
 - **Conversation Management**: Built-in conversation history and context management
 - **Customizable Base URLs**: For enterprise deployments or custom endpoints
 - **Token Usage Tracking**: Monitor token consumption across providers

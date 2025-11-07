@@ -12,6 +12,7 @@ import json
 from fourier import Fourier
 from models import Tool
 from exceptions import ToolExecutionError, InvalidRequestError
+from mcp import MCPClient
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +133,9 @@ class Agent:
         self.tools: Dict[str, Tool] = {}
         self.tool_functions: Dict[str, Callable] = {}
 
+        # MCP client for managing MCP tools
+        self.mcp_client: Optional[MCPClient] = None
+
         # Conversation state
         self.conversation_history: List[Dict[str, str]] = []
         self.intermediate_steps: List[Dict[str, Any]] = []
@@ -193,6 +197,193 @@ class Agent:
 
         if self.config.verbose:
             logger.info(f"Registered tool: {name}")
+
+    def _ensure_mcp_client(self) -> MCPClient:
+        """
+        Ensure MCP client is initialized.
+
+        Returns:
+            MCPClient instance
+        """
+        if self.mcp_client is None:
+            self.mcp_client = MCPClient()
+            if self.config.verbose:
+                logger.info("Initialized MCP client")
+        return self.mcp_client
+
+    def register_mcp_url(
+        self,
+        url: str,
+        name: Optional[str] = None,
+        headers: Optional[Dict[str, str]] = None
+    ) -> bool:
+        """
+        Register tools from a remote MCP server via URL.
+
+        Args:
+            url: MCP server URL
+            name: Optional connector name
+            headers: Optional HTTP headers
+
+        Returns:
+            True if successful
+
+        Example:
+            >>> agent.register_mcp_url("https://mcp.example.com/api")
+            True
+        """
+        mcp = self._ensure_mcp_client()
+        success = mcp.add_url(url, name, headers)
+
+        if success:
+            self._sync_mcp_tools()
+            if self.config.verbose:
+                logger.info(f"Registered MCP tools from URL: {url}")
+
+        return success
+
+    def register_mcp_config(
+        self,
+        config: Union[str, Dict[str, Any]],
+        name: Optional[str] = None
+    ) -> bool:
+        """
+        Register tools from MCP server configuration.
+
+        Args:
+            config: Config file path or config dictionary
+            name: Optional connector name
+
+        Returns:
+            True if successful
+
+        Example:
+            >>> agent.register_mcp_config("./mcp_config.json")
+            True
+            >>> agent.register_mcp_config({
+            ...     "command": "python",
+            ...     "args": ["-m", "mcp_server"],
+            ...     "env": {"API_KEY": "123"}
+            ... })
+            True
+        """
+        mcp = self._ensure_mcp_client()
+        success = mcp.add_config(config, name)
+
+        if success:
+            self._sync_mcp_tools()
+            if self.config.verbose:
+                logger.info(f"Registered MCP tools from config: {config}")
+
+        return success
+
+    def register_mcp_directory(self, directory: str, name: Optional[str] = None) -> bool:
+        """
+        Register tools from a directory containing MCP tools.
+
+        Args:
+            directory: Path to tool directory
+            name: Optional connector name
+
+        Returns:
+            True if successful
+
+        Example:
+            >>> agent.register_mcp_directory("./mcp_tools")
+            True
+        """
+        mcp = self._ensure_mcp_client()
+        success = mcp.add_directory(directory, name)
+
+        if success:
+            self._sync_mcp_tools()
+            if self.config.verbose:
+                logger.info(f"Registered MCP tools from directory: {directory}")
+
+        return success
+
+    def register_mcp_directories(self, directories: List[str]) -> Dict[str, bool]:
+        """
+        Register tools from multiple directories.
+
+        Args:
+            directories: List of directory paths
+
+        Returns:
+            Dictionary mapping directory paths to success status
+
+        Example:
+            >>> agent.register_mcp_directories([
+            ...     "./mcp_tools",
+            ...     "./custom_tools",
+            ...     "./external_tools"
+            ... ])
+            {'./mcp_tools': True, './custom_tools': True, './external_tools': True}
+        """
+        results = {}
+
+        for directory in directories:
+            results[directory] = self.register_mcp_directory(directory)
+
+        return results
+
+    def _sync_mcp_tools(self) -> None:
+        """
+        Synchronize MCP tools into the agent's tool registry.
+
+        This converts MCP tools to Fourier tools and registers their
+        execution functions.
+        """
+        if self.mcp_client is None:
+            return
+
+        mcp_tools = self.mcp_client.get_all_tools()
+
+        for mcp_tool in mcp_tools:
+            # Skip if already registered
+            if mcp_tool.name in self.tools:
+                continue
+
+            # Convert MCP tool to Fourier tool format
+            fourier_tool_dict = mcp_tool.to_fourier_tool()
+
+            # Create Tool instance
+            tool = self.client.create_tool(
+                name=fourier_tool_dict["name"],
+                description=fourier_tool_dict["description"],
+                parameters=fourier_tool_dict["parameters"],
+                required=fourier_tool_dict.get("required", [])
+            )
+
+            self.tools[mcp_tool.name] = tool
+
+            # Register execution function
+            if mcp_tool.function:
+                # Direct Python function
+                self.tool_functions[mcp_tool.name] = mcp_tool.function
+            else:
+                # Use MCP client to call the tool
+                def create_mcp_caller(tool_name):
+                    def mcp_caller(**kwargs):
+                        return self.mcp_client.call_tool(tool_name, kwargs)
+                    return mcp_caller
+
+                self.tool_functions[mcp_tool.name] = create_mcp_caller(mcp_tool.name)
+
+            if self.config.verbose:
+                logger.debug(f"Synced MCP tool: {mcp_tool.name}")
+
+    def get_mcp_tool_names(self) -> List[str]:
+        """
+        Get list of all MCP tool names.
+
+        Returns:
+            List of MCP tool names
+        """
+        if self.mcp_client is None:
+            return []
+
+        return self.mcp_client.get_tool_names()
 
     def execute_tool(self, tool_name: str, parameters: Dict[str, Any]) -> Any:
         """
