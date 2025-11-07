@@ -14,6 +14,8 @@ A Python SDK for accessing Large Language Models (LLMs) from various inference p
   - [Function Calling](#function-calling)
   - [Internet Search](#internet-search)
   - [Autonomous Agents](#autonomous-agents)
+  - [Assistants](#assistants)
+  - [Workflows](#workflows)
   - [Model Context Protocol (MCP)](#model-context-protocol-mcp)
   - [Provider-Specific Examples](#provider-specific-examples)
 - [Features](#features)
@@ -405,6 +407,347 @@ Thinking Mode includes enterprise-ready features:
 
 See [PRODUCTION_FEATURES.md](PRODUCTION_FEATURES.md) for comprehensive production features documentation.
 
+### Assistants
+
+FourierSDK includes an Assistant framework for simple, context-aware conversational interfaces. Unlike Agents, Assistants do not automatically execute tools - they focus on maintaining conversation history and can optionally integrate with RAG (Retrieval Augmented Generation) for document-based Q&A.
+
+**When to Use Assistants:**
+- Simple conversational interactions
+- Document Q&A with RAG support
+- Maintaining conversation history
+- Building chatbots without automatic tool execution
+- Lower overhead compared to Agents
+
+**Basic Assistant Example:**
+
+```python
+from fourier import Fourier
+from assistant import Assistant, AssistantConfig
+
+# Create client
+client = Fourier(api_key=os.getenv("GROQ_API_KEY"), provider="groq")
+
+# Create assistant
+assistant = Assistant(
+    client=client,
+    name="ChatBot",
+    model="mixtral-8x7b-32768",
+    config=AssistantConfig(
+        temperature=0.7,
+        max_history=50,
+        system_prompt="You are a friendly and helpful assistant."
+    )
+)
+
+# Have a conversation
+response1 = assistant.chat("My name is Alice")
+print(response1["output"])
+
+response2 = assistant.chat("What's my name?")
+print(response2["output"])  # Will remember "Alice"
+
+# Get conversation stats
+stats = assistant.get_stats()
+print(f"Messages: {stats['total_messages']}")
+```
+
+**RAG-Enabled Assistant:**
+
+```python
+# Create assistant with RAG
+assistant = Assistant(
+    client=client,
+    model="mixtral-8x7b-32768",
+    config=AssistantConfig(
+        enable_rag=True,
+        rag_top_k=3,
+        system_prompt="Answer questions based on the provided documents."
+    )
+)
+
+# Add documents
+documents = [
+    {
+        "content": "FourierSDK is a Python SDK for accessing multiple LLM providers.",
+        "metadata": {"source": "docs.txt"}
+    },
+    {
+        "content": "The Agent class allows autonomous tool execution with configurable behavior.",
+        "metadata": {"source": "agent_docs.txt"}
+    }
+]
+
+assistant.add_documents(documents)
+
+# Ask questions about documents
+response = assistant.chat("What is FourierSDK?")
+print(response["output"])  # Uses document context to answer
+```
+
+**Conversation Persistence:**
+
+```python
+# Save conversation
+assistant.save_conversation("conversation.json")
+
+# Load in new assistant
+new_assistant = Assistant(client=client, model="mixtral-8x7b-32768")
+new_assistant.load_conversation("conversation.json")
+
+# Continue conversation
+response = new_assistant.chat("What were we discussing?")
+```
+
+**Key Assistant Features:**
+- ✅ **Conversation History**: Automatic history management with configurable limits
+- ✅ **RAG Support**: Document-based context with keyword retrieval
+- ✅ **Persistence**: Save and load conversations
+- ✅ **Multiple Personalities**: Create specialized assistants with different prompts
+- ✅ **Simple API**: Easier to use than Agents when tools aren't needed
+- ✅ **Lower Overhead**: No tool execution loop, faster responses
+
+**Assistant vs Agent:**
+
+| Feature | Assistant | Agent |
+|---------|-----------|-------|
+| Conversation History | ✅ Yes | ✅ Yes |
+| RAG Support | ✅ Yes | ❌ No |
+| Auto Tool Execution | ❌ No | ✅ Yes |
+| Thinking Mode | ❌ No | ✅ Yes |
+| Complexity | Low | High |
+| Best For | Chat, Q&A | Task Completion |
+
+See [ASSISTANT.md](ASSISTANT.md) for complete documentation, RAG examples, and best practices.
+
+### Workflows
+
+FourierSDK includes a powerful Workflow system for orchestrating complex AI pipelines. Similar to n8n, workflows let you compose agents, assistants, and transformations into sophisticated multi-step processes with conditional branching.
+
+**Workflow Features:**
+- 7 node types: INPUT, AGENT, ASSISTANT, TRANSFORM, CONDITION, OUTPUT, TOOL, RAG
+- Sequential execution engine
+- Conditional branching
+- Visual workflow representation
+- Execution tracking and debugging
+- JSON persistence
+
+**Simple Linear Workflow:**
+
+```python
+from fourier import Fourier
+from assistant import Assistant
+from workflow import Workflow
+
+# Create client and assistant
+client = Fourier(api_key=os.getenv("GROQ_API_KEY"), provider="groq")
+assistant = Assistant(client=client, model="mixtral-8x7b-32768")
+
+# Create workflow
+workflow = Workflow(name="SimpleWorkflow")
+
+# Add nodes
+input_node = workflow.add_input_node("Start")
+assistant_node = workflow.add_assistant_node(assistant, "Assistant")
+output_node = workflow.add_output_node("Result")
+
+# Connect nodes
+workflow.connect(input_node.node_id, assistant_node.node_id)
+workflow.connect(assistant_node.node_id, output_node.node_id)
+
+# Visualize
+print(workflow.visualize())
+
+# Execute
+result = workflow.execute("What is the capital of France?")
+print(f"Output: {result['output']}")
+print(f"Execution time: {result['execution_time']:.2f}s")
+```
+
+**Conditional Branching Workflow:**
+
+```python
+# Create assistants with different prompts
+brief_assistant = Assistant(
+    client=client,
+    model="mixtral-8x7b-32768",
+    config=AssistantConfig(
+        system_prompt="Give very brief, one-sentence answers."
+    )
+)
+
+detailed_assistant = Assistant(
+    client=client,
+    model="mixtral-8x7b-32768",
+    config=AssistantConfig(
+        system_prompt="Give detailed, comprehensive answers."
+    )
+)
+
+# Create workflow with branching
+workflow = Workflow(name="ConditionalWorkflow")
+
+input_node = workflow.add_input_node()
+
+# Condition: Check if query is short
+condition_node = workflow.add_condition_node(
+    lambda x: len(str(x)) < 20,
+    "IsShortQuery"
+)
+
+brief_node = workflow.add_assistant_node(brief_assistant, "BriefResponse")
+detailed_node = workflow.add_assistant_node(detailed_assistant, "DetailedResponse")
+output_node = workflow.add_output_node()
+
+# Connect and set branches
+workflow.connect(input_node.node_id, condition_node.node_id)
+condition_node.true_branch = brief_node.node_id
+condition_node.false_branch = detailed_node.node_id
+workflow.connect(brief_node.node_id, output_node.node_id)
+workflow.connect(detailed_node.node_id, output_node.node_id)
+
+# Execute with different inputs
+result1 = workflow.execute("What is AI?")  # Short → brief response
+result2 = workflow.execute("Can you explain quantum computing?")  # Long → detailed response
+```
+
+**Multi-Agent Research Pipeline:**
+
+```python
+from agent import Agent, AgentConfig
+
+# Create specialized agents
+researcher = Agent(
+    client=client,
+    name="Researcher",
+    config=AgentConfig(
+        system_prompt="You are a researcher. Provide factual information.",
+        thinking_mode=True
+    )
+)
+
+analyzer = Agent(
+    client=client,
+    name="Analyzer",
+    config=AgentConfig(
+        system_prompt="You are an analyzer. Break down and structure information."
+    )
+)
+
+summarizer = Assistant(
+    client=client,
+    config=AssistantConfig(
+        system_prompt="You are a summarizer. Create concise summaries."
+    )
+)
+
+# Create pipeline
+workflow = Workflow(name="ResearchPipeline")
+
+input_node = workflow.add_input_node("Topic")
+researcher_node = workflow.add_agent_node(researcher, "Research")
+analyzer_node = workflow.add_agent_node(analyzer, "Analyze")
+summarizer_node = workflow.add_assistant_node(summarizer, "Summarize")
+output_node = workflow.add_output_node("Report")
+
+# Connect stages
+workflow.connect(input_node.node_id, researcher_node.node_id)
+workflow.connect(researcher_node.node_id, analyzer_node.node_id)
+workflow.connect(analyzer_node.node_id, summarizer_node.node_id)
+workflow.connect(summarizer_node.node_id, output_node.node_id)
+
+# Execute research pipeline
+result = workflow.execute("Quantum computing applications", verbose=True)
+print(result["output"])
+```
+
+**Transform Pipeline:**
+
+```python
+# Add data transformations between processing steps
+workflow = Workflow(name="TransformPipeline")
+
+input_node = workflow.add_input_node()
+
+# Preprocessing
+clean_node = workflow.add_transform_node(
+    lambda x: x.strip().lower(),
+    "Clean"
+)
+
+prefix_node = workflow.add_transform_node(
+    lambda x: f"Question: {x}",
+    "AddPrefix"
+)
+
+# Processing
+assistant_node = workflow.add_assistant_node(assistant, "Process")
+
+# Postprocessing
+extract_node = workflow.add_transform_node(
+    lambda x: x.split('.')[0] + '.',
+    "ExtractFirstSentence"
+)
+
+output_node = workflow.add_output_node()
+
+# Connect all stages
+workflow.connect(input_node.node_id, clean_node.node_id)
+workflow.connect(clean_node.node_id, prefix_node.node_id)
+workflow.connect(prefix_node.node_id, assistant_node.node_id)
+workflow.connect(assistant_node.node_id, extract_node.node_id)
+workflow.connect(extract_node.node_id, output_node.node_id)
+
+result = workflow.execute("what is machine learning?", verbose=True)
+```
+
+**Workflow Visualization:**
+
+```python
+print(workflow.visualize())
+
+# Output:
+# Workflow: ResearchPipeline
+# Nodes: 5
+# ─────────────────────────────
+# INPUT → input_123 (Topic)
+# AGENT → agent_456 (Research)
+# AGENT → agent_789 (Analyze)
+# ASSISTANT → asst_012 (Summarize)
+# OUTPUT → output_345 (Report)
+#
+# Connections:
+# input_123 → agent_456
+# agent_456 → agent_789
+# agent_789 → asst_012
+# asst_012 → output_345
+```
+
+**Workflow Persistence:**
+
+```python
+# Save workflow structure
+workflow.save("workflow.json")
+
+# View saved structure
+import json
+with open("workflow.json", 'r') as f:
+    data = json.load(f)
+
+print(f"Workflow: {data['name']}")
+print(f"Nodes: {len(data['nodes'])}")
+print(f"Executions: {data['execution_count']}")
+```
+
+**Key Workflow Benefits:**
+- ✅ **Composable**: Mix agents, assistants, and transformations
+- ✅ **Visual**: Text-based workflow visualization
+- ✅ **Conditional**: Branching logic based on data
+- ✅ **Traceable**: Full execution tracking and debugging
+- ✅ **Reusable**: Save and version workflow structures
+- ✅ **Flexible**: 7 node types for different operations
+
+See [WORKFLOW.md](WORKFLOW.md) for complete documentation, advanced patterns, and best practices.
+
 ### Model Context Protocol (MCP)
 
 FourierSDK includes comprehensive support for the Model Context Protocol (MCP), allowing you to connect your agents and applications to external tools and data sources through a standardized protocol.
@@ -550,24 +893,66 @@ print(response["response"]["output"])
 
 ## Features
 
+### Core Features
 - **Multi-Provider Support**: Easily switch between Groq, Together AI, OpenAI, Anthropic, Perplexity, and Nebius
 - **Standardized Response Format**: Consistent response structure regardless of the provider
-- **Command Line Interface (CLI)**: Comprehensive CLI for managing agents and MCP tools without writing code
 - **Function Calling**: Define and use functions/tools with JSON schema validation
 - **Internet Search**: Augment LLM responses with up-to-date information from the web
-- **Autonomous Agents**: Create agents that automatically use tools and manage conversations
-- **Thinking Mode**: Deep research capability with automatic multi-query web searches and synthesis
-- **Model Context Protocol (MCP)**: Connect to remote MCP servers, load tools from directories, and use Claude Desktop-compatible configurations
-- **Interactive Shell**: REPL-style interface for agent interaction and management
-- **Agent Persistence**: Save and load agent configurations with JSON storage
-- **Conversation Management**: Built-in conversation history and context management
-- **Customizable Base URLs**: For enterprise deployments or custom endpoints
-- **Token Usage Tracking**: Monitor token consumption across providers
 - **Type Hints**: Full type annotations for better IDE support
 - **Error Handling**: Comprehensive exception hierarchy for precise error handling
 - **Logging**: Production-ready logging framework
-- **Configurable Behavior**: Fine-tune agent iterations, timeouts, and error handling
+- **Token Usage Tracking**: Monitor token consumption across providers
+- **Customizable Base URLs**: For enterprise deployments or custom endpoints
+
+### CLI Features
+- **Command Line Interface (CLI)**: Comprehensive CLI for managing agents and MCP tools without writing code
+- **Interactive Shell**: REPL-style interface for agent interaction and management
+- **Agent Persistence**: Save and load agent configurations with JSON storage
+- **Configuration Management**: JSON-based config storage at ~/.fourier/config.json
 - **Scriptable**: Use CLI in automation and CI/CD pipelines
+- **ANSI Colored Output**: Enhanced readability in terminal
+
+### Agent Features
+- **Autonomous Agents**: Create agents that automatically use tools and manage conversations
+- **Thinking Mode**: Deep research capability with automatic multi-query web searches and synthesis
+- **Tool Registration**: Register custom tools with JSON schema validation
+- **Conversation Memory**: Maintains context across multiple interactions
+- **Configurable Behavior**: Fine-tune iterations, timeouts, and error handling
+- **Intermediate Steps**: Track tool usage and execution flow
+- **Error Resilience**: Continue execution even when tools fail
+
+### Assistant Features
+- **Simple Assistants**: Context-aware LLM wrappers without automatic tool execution
+- **RAG Support**: Document-based Q&A with keyword-based retrieval
+- **Conversation History**: Automatic history management with configurable limits
+- **Conversation Persistence**: Save and load conversation state
+- **Multiple Personalities**: Create specialized assistants with different prompts
+- **Low Overhead**: Simpler API and faster responses than agents
+
+### Workflow Features
+- **Node-Based Orchestration**: Compose complex AI pipelines like n8n
+- **7 Node Types**: INPUT, AGENT, ASSISTANT, TRANSFORM, CONDITION, OUTPUT, TOOL, RAG
+- **Sequential Execution**: Ordered execution with cycle detection
+- **Conditional Branching**: Dynamic routing based on data
+- **Visual Representation**: Text-based workflow visualization
+- **Execution Tracking**: Full debugging and performance metrics
+- **Workflow Persistence**: Save and version workflow structures
+
+### MCP Features
+- **Model Context Protocol (MCP)**: Connect to remote MCP servers, load tools from directories
+- **MCP URL Support**: Connect to remote MCP servers via HTTP/HTTPS
+- **MCP Config Files**: Use Claude Desktop-compatible configuration files
+- **MCP Directories**: Load tools from local directories
+- **Dynamic Tool Loading**: Add and manage MCP tools at runtime
+
+### Production Features
+- **Input Sanitization**: Automatic query validation and cleaning (XSS/injection prevention)
+- **Rate Limiting**: Built-in delays prevent API abuse
+- **Context Management**: Automatic truncation prevents token limit issues
+- **Configuration Validation**: Auto-correction of invalid parameters
+- **Graceful Degradation**: Fallback mechanisms for partial failures
+- **Performance Monitoring**: Detailed timing and success metrics
+- **Comprehensive Testing**: 40+ unit tests for thinking mode and core features
 
 ## API Reference
 
