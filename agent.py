@@ -9,11 +9,28 @@ from typing import List, Dict, Any, Optional, Callable, Union
 from dataclasses import dataclass, field
 import logging
 import json
+import time
+import hashlib
+import re
+from functools import lru_cache
 from fourier import Fourier
 from models import Tool
 from exceptions import ToolExecutionError, InvalidRequestError
+from mcp import MCPClient
+from web_search import web_search
 
 logger = logging.getLogger(__name__)
+
+# Production safety constants
+MAX_THINKING_DEPTH = 5
+MIN_THINKING_DEPTH = 1
+MAX_SEARCH_RESULTS = 10
+MIN_SEARCH_RESULTS = 1
+MAX_CONTEXT_LENGTH = 50000  # Characters
+SEARCH_TIMEOUT = 30  # Seconds per search
+QUERY_GENERATION_TIMEOUT = 15  # Seconds
+MAX_QUERY_LENGTH = 500  # Characters
+RATE_LIMIT_DELAY = 1.0  # Seconds between searches
 
 
 @dataclass
@@ -49,6 +66,57 @@ class AgentConfig:
 
     timeout_seconds: Optional[int] = None
     """Maximum execution time in seconds (None for no limit)."""
+
+    thinking_mode: bool = False
+    """Enable thinking mode for deep research and analysis."""
+
+    thinking_depth: int = 2
+    """Number of research queries to perform in thinking mode (1-5)."""
+
+    thinking_web_search_results: int = 5
+    """Number of web search results to retrieve per query in thinking mode."""
+
+    def __post_init__(self):
+        """Validate configuration parameters."""
+        # Validate max_iterations
+        if self.max_iterations < 1:
+            logger.warning(f"max_iterations must be >= 1, got {self.max_iterations}. Setting to 1.")
+            self.max_iterations = 1
+        elif self.max_iterations > 100:
+            logger.warning(f"max_iterations > 100 may cause performance issues. Got {self.max_iterations}.")
+
+        # Validate max_tool_calls_per_iteration
+        if self.max_tool_calls_per_iteration < 1:
+            logger.warning(f"max_tool_calls_per_iteration must be >= 1, got {self.max_tool_calls_per_iteration}. Setting to 1.")
+            self.max_tool_calls_per_iteration = 1
+
+        # Validate temperature
+        if not 0.0 <= self.temperature <= 2.0:
+            logger.warning(f"temperature should be between 0.0 and 2.0, got {self.temperature}. Clamping.")
+            self.temperature = max(0.0, min(2.0, self.temperature))
+
+        # Validate thinking_depth
+        if self.thinking_mode:
+            if self.thinking_depth < MIN_THINKING_DEPTH:
+                logger.warning(f"thinking_depth must be >= {MIN_THINKING_DEPTH}, got {self.thinking_depth}. Setting to {MIN_THINKING_DEPTH}.")
+                self.thinking_depth = MIN_THINKING_DEPTH
+            elif self.thinking_depth > MAX_THINKING_DEPTH:
+                logger.warning(f"thinking_depth must be <= {MAX_THINKING_DEPTH}, got {self.thinking_depth}. Setting to {MAX_THINKING_DEPTH}.")
+                self.thinking_depth = MAX_THINKING_DEPTH
+
+        # Validate thinking_web_search_results
+        if self.thinking_mode:
+            if self.thinking_web_search_results < MIN_SEARCH_RESULTS:
+                logger.warning(f"thinking_web_search_results must be >= {MIN_SEARCH_RESULTS}, got {self.thinking_web_search_results}. Setting to {MIN_SEARCH_RESULTS}.")
+                self.thinking_web_search_results = MIN_SEARCH_RESULTS
+            elif self.thinking_web_search_results > MAX_SEARCH_RESULTS:
+                logger.warning(f"thinking_web_search_results must be <= {MAX_SEARCH_RESULTS}, got {self.thinking_web_search_results}. Setting to {MAX_SEARCH_RESULTS}.")
+                self.thinking_web_search_results = MAX_SEARCH_RESULTS
+
+        # Validate timeout_seconds
+        if self.timeout_seconds is not None and self.timeout_seconds < 1:
+            logger.warning(f"timeout_seconds must be >= 1 or None, got {self.timeout_seconds}. Setting to None.")
+            self.timeout_seconds = None
 
 
 class Agent:
@@ -132,6 +200,9 @@ class Agent:
         self.tools: Dict[str, Tool] = {}
         self.tool_functions: Dict[str, Callable] = {}
 
+        # MCP client for managing MCP tools
+        self.mcp_client: Optional[MCPClient] = None
+
         # Conversation state
         self.conversation_history: List[Dict[str, str]] = []
         self.intermediate_steps: List[Dict[str, Any]] = []
@@ -194,6 +265,193 @@ class Agent:
         if self.config.verbose:
             logger.info(f"Registered tool: {name}")
 
+    def _ensure_mcp_client(self) -> MCPClient:
+        """
+        Ensure MCP client is initialized.
+
+        Returns:
+            MCPClient instance
+        """
+        if self.mcp_client is None:
+            self.mcp_client = MCPClient()
+            if self.config.verbose:
+                logger.info("Initialized MCP client")
+        return self.mcp_client
+
+    def register_mcp_url(
+        self,
+        url: str,
+        name: Optional[str] = None,
+        headers: Optional[Dict[str, str]] = None
+    ) -> bool:
+        """
+        Register tools from a remote MCP server via URL.
+
+        Args:
+            url: MCP server URL
+            name: Optional connector name
+            headers: Optional HTTP headers
+
+        Returns:
+            True if successful
+
+        Example:
+            >>> agent.register_mcp_url("https://mcp.example.com/api")
+            True
+        """
+        mcp = self._ensure_mcp_client()
+        success = mcp.add_url(url, name, headers)
+
+        if success:
+            self._sync_mcp_tools()
+            if self.config.verbose:
+                logger.info(f"Registered MCP tools from URL: {url}")
+
+        return success
+
+    def register_mcp_config(
+        self,
+        config: Union[str, Dict[str, Any]],
+        name: Optional[str] = None
+    ) -> bool:
+        """
+        Register tools from MCP server configuration.
+
+        Args:
+            config: Config file path or config dictionary
+            name: Optional connector name
+
+        Returns:
+            True if successful
+
+        Example:
+            >>> agent.register_mcp_config("./mcp_config.json")
+            True
+            >>> agent.register_mcp_config({
+            ...     "command": "python",
+            ...     "args": ["-m", "mcp_server"],
+            ...     "env": {"API_KEY": "123"}
+            ... })
+            True
+        """
+        mcp = self._ensure_mcp_client()
+        success = mcp.add_config(config, name)
+
+        if success:
+            self._sync_mcp_tools()
+            if self.config.verbose:
+                logger.info(f"Registered MCP tools from config: {config}")
+
+        return success
+
+    def register_mcp_directory(self, directory: str, name: Optional[str] = None) -> bool:
+        """
+        Register tools from a directory containing MCP tools.
+
+        Args:
+            directory: Path to tool directory
+            name: Optional connector name
+
+        Returns:
+            True if successful
+
+        Example:
+            >>> agent.register_mcp_directory("./mcp_tools")
+            True
+        """
+        mcp = self._ensure_mcp_client()
+        success = mcp.add_directory(directory, name)
+
+        if success:
+            self._sync_mcp_tools()
+            if self.config.verbose:
+                logger.info(f"Registered MCP tools from directory: {directory}")
+
+        return success
+
+    def register_mcp_directories(self, directories: List[str]) -> Dict[str, bool]:
+        """
+        Register tools from multiple directories.
+
+        Args:
+            directories: List of directory paths
+
+        Returns:
+            Dictionary mapping directory paths to success status
+
+        Example:
+            >>> agent.register_mcp_directories([
+            ...     "./mcp_tools",
+            ...     "./custom_tools",
+            ...     "./external_tools"
+            ... ])
+            {'./mcp_tools': True, './custom_tools': True, './external_tools': True}
+        """
+        results = {}
+
+        for directory in directories:
+            results[directory] = self.register_mcp_directory(directory)
+
+        return results
+
+    def _sync_mcp_tools(self) -> None:
+        """
+        Synchronize MCP tools into the agent's tool registry.
+
+        This converts MCP tools to Fourier tools and registers their
+        execution functions.
+        """
+        if self.mcp_client is None:
+            return
+
+        mcp_tools = self.mcp_client.get_all_tools()
+
+        for mcp_tool in mcp_tools:
+            # Skip if already registered
+            if mcp_tool.name in self.tools:
+                continue
+
+            # Convert MCP tool to Fourier tool format
+            fourier_tool_dict = mcp_tool.to_fourier_tool()
+
+            # Create Tool instance
+            tool = self.client.create_tool(
+                name=fourier_tool_dict["name"],
+                description=fourier_tool_dict["description"],
+                parameters=fourier_tool_dict["parameters"],
+                required=fourier_tool_dict.get("required", [])
+            )
+
+            self.tools[mcp_tool.name] = tool
+
+            # Register execution function
+            if mcp_tool.function:
+                # Direct Python function
+                self.tool_functions[mcp_tool.name] = mcp_tool.function
+            else:
+                # Use MCP client to call the tool
+                def create_mcp_caller(tool_name):
+                    def mcp_caller(**kwargs):
+                        return self.mcp_client.call_tool(tool_name, kwargs)
+                    return mcp_caller
+
+                self.tool_functions[mcp_tool.name] = create_mcp_caller(mcp_tool.name)
+
+            if self.config.verbose:
+                logger.debug(f"Synced MCP tool: {mcp_tool.name}")
+
+    def get_mcp_tool_names(self) -> List[str]:
+        """
+        Get list of all MCP tool names.
+
+        Returns:
+            List of MCP tool names
+        """
+        if self.mcp_client is None:
+            return []
+
+        return self.mcp_client.get_tool_names()
+
     def execute_tool(self, tool_name: str, parameters: Dict[str, Any]) -> Any:
         """
         Execute a registered tool.
@@ -255,6 +513,285 @@ class Agent:
             f"Tool '{tool_name}' was executed with parameters {json.dumps(tool_parameters)}. "
             f"Result: {result}"
         )
+
+    @staticmethod
+    def _sanitize_query(query: str) -> Optional[str]:
+        """
+        Sanitize and validate a search query.
+
+        Args:
+            query: Raw search query
+
+        Returns:
+            Sanitized query or None if invalid
+        """
+        if not query or not isinstance(query, str):
+            return None
+
+        # Remove excessive whitespace
+        sanitized = ' '.join(query.split())
+
+        # Remove leading/trailing whitespace
+        sanitized = sanitized.strip()
+
+        # Check length
+        if len(sanitized) < 2 or len(sanitized) > MAX_QUERY_LENGTH:
+            logger.warning(f"Query length out of bounds: {len(sanitized)}")
+            if len(sanitized) > MAX_QUERY_LENGTH:
+                sanitized = sanitized[:MAX_QUERY_LENGTH]
+            else:
+                return None
+
+        # Remove potentially harmful characters but keep basic punctuation
+        # Allow alphanumeric, spaces, and basic punctuation
+        if not re.match(r'^[\w\s\-.,!?\'"():]+$', sanitized, re.UNICODE):
+            logger.warning(f"Query contains suspicious characters: {sanitized[:50]}")
+            # Remove suspicious characters
+            sanitized = re.sub(r'[^\w\s\-.,!?\'"():]', '', sanitized, flags=re.UNICODE)
+
+        return sanitized if sanitized else None
+
+    @staticmethod
+    def _truncate_context(context: str, max_length: int = MAX_CONTEXT_LENGTH) -> str:
+        """
+        Truncate research context to prevent token limit issues.
+
+        Args:
+            context: Research context string
+            max_length: Maximum length in characters
+
+        Returns:
+            Truncated context
+        """
+        if len(context) <= max_length:
+            return context
+
+        logger.warning(f"Context truncated from {len(context)} to {max_length} characters")
+
+        # Truncate and add notice
+        truncated = context[:max_length]
+        truncated += "\n\n[Context truncated due to length...]"
+
+        return truncated
+
+    def _generate_search_queries(self, user_input: str, depth: int) -> List[str]:
+        """
+        Generate diverse search queries using LLM.
+
+        Args:
+            user_input: User's original query
+            depth: Number of queries to generate
+
+        Returns:
+            List of sanitized search queries
+
+        Raises:
+            ToolExecutionError: If query generation fails
+        """
+        try:
+            # Sanitize user input first
+            safe_input = self._sanitize_query(user_input)
+            if not safe_input:
+                logger.error("[Thinking Mode] Invalid user input for query generation")
+                return [user_input[:MAX_QUERY_LENGTH]]  # Fallback to truncated original
+
+            query_generation_prompt = f"""Given this user question: "{safe_input}"
+
+Generate {depth} diverse search queries that would help gather comprehensive information to answer this question.
+Each query should focus on a different aspect or angle of the question.
+
+Requirements:
+- Keep queries concise and specific
+- Focus on factual, verifiable information
+- Avoid redundant queries
+- Return ONLY the queries, one per line, without numbering or explanations."""
+
+            if self.config.verbose:
+                logger.info("[Thinking Mode] Generating research queries...")
+
+            start_time = time.time()
+
+            # Generate queries with timeout
+            response = self.client.chat(
+                model=self.model,
+                messages=[{"role": "user", "content": query_generation_prompt}],
+                temperature=0.7,
+                max_tokens=500
+            )
+
+            elapsed = time.time() - start_time
+
+            if elapsed > QUERY_GENERATION_TIMEOUT:
+                logger.warning(f"[Thinking Mode] Query generation took {elapsed:.2f}s (>{QUERY_GENERATION_TIMEOUT}s)")
+
+            # Extract and sanitize queries
+            queries_text = response.get("response", {}).get("output", "")
+            raw_queries = [q.strip() for q in queries_text.split("\n") if q.strip()]
+
+            # Sanitize each query
+            search_queries = []
+            for raw_query in raw_queries:
+                sanitized = self._sanitize_query(raw_query)
+                if sanitized:
+                    search_queries.append(sanitized)
+
+            # Fallback to user input if no valid queries
+            if not search_queries:
+                logger.warning("[Thinking Mode] No valid queries generated, using original input")
+                fallback = self._sanitize_query(user_input) or user_input[:MAX_QUERY_LENGTH]
+                search_queries = [fallback]
+
+            # Limit to requested depth
+            search_queries = search_queries[:depth]
+
+            if self.config.verbose:
+                logger.info(f"[Thinking Mode] Generated {len(search_queries)} valid queries")
+
+            return search_queries
+
+        except Exception as e:
+            logger.error(f"[Thinking Mode] Query generation failed: {e}", exc_info=True)
+            # Return sanitized fallback
+            fallback = self._sanitize_query(user_input) or user_input[:MAX_QUERY_LENGTH]
+            return [fallback]
+
+    def _perform_single_search(self, query: str, query_num: int, total: int) -> Optional[str]:
+        """
+        Perform a single web search with error handling and rate limiting.
+
+        Args:
+            query: Search query
+            query_num: Current query number (for logging)
+            total: Total number of queries
+
+        Returns:
+            Search results or None if failed
+        """
+        try:
+            if self.config.verbose:
+                logger.info(f"[Thinking Mode] Search {query_num}/{total}: {query[:100]}")
+
+            # Rate limiting
+            if query_num > 1:
+                time.sleep(RATE_LIMIT_DELAY)
+
+            start_time = time.time()
+
+            # Perform search with configured number of results
+            search_results = web_search(
+                query,
+                num_results=self.config.thinking_web_search_results
+            )
+
+            elapsed = time.time() - start_time
+
+            if elapsed > SEARCH_TIMEOUT:
+                logger.warning(f"[Thinking Mode] Search took {elapsed:.2f}s (>{SEARCH_TIMEOUT}s)")
+
+            if search_results:
+                result_len = len(search_results)
+                if self.config.verbose:
+                    logger.info(f"[Thinking Mode] Search completed: {result_len} characters in {elapsed:.2f}s")
+                return search_results
+            else:
+                logger.warning(f"[Thinking Mode] Empty results for query: {query[:50]}")
+                return None
+
+        except Exception as e:
+            logger.error(f"[Thinking Mode] Search failed for '{query[:50]}': {e}", exc_info=True)
+            if self.config.stop_on_error:
+                raise
+            return None
+
+    def _perform_thinking_research(self, user_input: str) -> str:
+        """
+        Perform deep research using web search for thinking mode (Production Grade).
+
+        This method conducts multiple web searches to gather comprehensive
+        context and information related to the user's query with robust error
+        handling, rate limiting, input validation, and context management.
+
+        Args:
+            user_input: The user's input/query
+
+        Returns:
+            Formatted research context string
+
+        Raises:
+            ToolExecutionError: If research fails and stop_on_error is True
+        """
+        # Input validation
+        if not user_input or not isinstance(user_input, str):
+            logger.error("[Thinking Mode] Invalid user input provided")
+            return ""
+
+        if len(user_input) > MAX_QUERY_LENGTH * 5:  # More lenient for original input
+            logger.warning(f"[Thinking Mode] User input very long ({len(user_input)} chars), truncating")
+            user_input = user_input[:MAX_QUERY_LENGTH * 5]
+
+        if self.config.verbose:
+            logger.info(f"[Thinking Mode] Starting deep research for: {user_input[:100]}...")
+
+        # Track metrics
+        start_time = time.time()
+        successful_searches = 0
+        failed_searches = 0
+        research_context = []
+
+        try:
+            # Generate search queries
+            search_queries = self._generate_search_queries(
+                user_input,
+                self.config.thinking_depth
+            )
+
+            if not search_queries:
+                logger.warning("[Thinking Mode] No search queries generated")
+                return ""
+
+            # Perform web searches
+            total_queries = len(search_queries)
+
+            for i, query in enumerate(search_queries, 1):
+                search_result = self._perform_single_search(query, i, total_queries)
+
+                if search_result:
+                    successful_searches += 1
+                    research_context.append(f"\n=== Research Query {i}: {query} ===\n")
+                    research_context.append(search_result)
+                else:
+                    failed_searches += 1
+
+            # Compile and truncate research context
+            if research_context:
+                full_context = "\n".join(research_context)
+
+                # Truncate if too long
+                full_context = self._truncate_context(full_context)
+
+                elapsed = time.time() - start_time
+
+                if self.config.verbose:
+                    logger.info(
+                        f"[Thinking Mode] Research complete in {elapsed:.2f}s: "
+                        f"{len(full_context)} chars, "
+                        f"{successful_searches} successful, "
+                        f"{failed_searches} failed"
+                    )
+
+                return full_context
+            else:
+                logger.warning("[Thinking Mode] No research context gathered from any source")
+                return ""
+
+        except Exception as e:
+            logger.error(f"[Thinking Mode] Research failed: {e}", exc_info=True)
+            if self.config.stop_on_error:
+                raise ToolExecutionError(
+                    f"Thinking mode research failed: {str(e)}",
+                    "thinking_research"
+                )
+            return ""
 
     def _build_messages(self, user_input: str) -> List[Dict[str, str]]:
         """
@@ -327,8 +864,32 @@ class Agent:
         # Merge kwargs
         request_kwargs = {**self.kwargs, **override_kwargs}
 
+        # Perform thinking mode research if enabled
+        enhanced_input = user_input
+        if self.config.thinking_mode:
+            if self.config.verbose:
+                logger.info("[Thinking Mode] Enabled - performing deep research")
+
+            research_context = self._perform_thinking_research(user_input)
+
+            if research_context:
+                # Enhance the user input with research context
+                enhanced_input = f"""I have gathered the following research context to help answer your question:
+
+{research_context}
+
+---
+
+Based on the above research context, please answer this question:
+{user_input}
+
+Synthesize the information from multiple sources and provide a comprehensive, well-reasoned answer."""
+
+                if self.config.verbose:
+                    logger.info(f"[Thinking Mode] Enhanced input with {len(research_context)} chars of context")
+
         # Build initial messages
-        messages = self._build_messages(user_input)
+        messages = self._build_messages(enhanced_input)
 
         # Track execution
         iterations = 0

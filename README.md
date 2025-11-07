@@ -10,9 +10,11 @@ A Python SDK for accessing Large Language Models (LLMs) from various inference p
   - [Environment Variables](#environment-variables)
 - [Usage](#usage)
   - [Quick Start](#quick-start)
+  - [Command Line Interface (CLI)](#command-line-interface-cli)
   - [Function Calling](#function-calling)
   - [Internet Search](#internet-search)
   - [Autonomous Agents](#autonomous-agents)
+  - [Model Context Protocol (MCP)](#model-context-protocol-mcp)
   - [Provider-Specific Examples](#provider-specific-examples)
 - [Features](#features)
 - [API Reference](#api-reference)
@@ -96,6 +98,109 @@ print(response["response"]["output"])
 usage = response.get("usage", {})
 print(f"Tokens: {usage.get('input_tokens', 0)} in / {usage.get('output_tokens', 0)} out")
 ```
+
+### Command Line Interface (CLI)
+
+FourierSDK includes a comprehensive command-line interface for managing agents, MCP tools, and running queries without writing code.
+
+**Quick Start:**
+
+```bash
+# Quick chat
+python cli.py chat "What is quantum computing?"
+
+# Interactive mode
+python cli.py interactive
+
+# Create an agent
+python cli.py create-agent --name ResearchBot --thinking-mode --save
+
+# Add MCP tools
+python cli.py add-mcp --directory ./mcp_tools --agent ResearchBot
+
+# Run saved agent
+python cli.py run --agent ResearchBot --query "Latest AI developments"
+```
+
+**Interactive Shell:**
+
+```bash
+$ python cli.py interactive
+╔═══════════════════════════════════════════════════════════╗
+║              FourierSDK Interactive Shell                 ║
+║                                                           ║
+║  Type 'help' for commands, 'exit' to quit               ║
+╚═══════════════════════════════════════════════════════════╝
+
+fourier> create-agent
+Agent name: MyAgent
+Provider (groq/openai/anthropic/together) [groq]: groq
+Enable thinking mode? (y/N): y
+✓ Agent 'MyAgent' created
+
+fourier> chat Hello, how can you help?
+Processing...
+
+Hello! I'm your AI assistant. I can help with...
+
+fourier> add-mcp directory ./mcp_tools
+✓ MCP directory added
+
+fourier> list-agents
+Saved Agents:
+  MyAgent
+  ResearchBot
+
+fourier> exit
+```
+
+**Key CLI Commands:**
+
+- `interactive`: Start interactive shell
+- `chat`: Quick one-off queries
+- `create-agent`: Create and save agents
+- `add-mcp`: Add MCP tools (URL, config, directory)
+- `list-agents`: List all saved agents
+- `list-mcp`: List MCP tools
+- `run`: Run saved agent with query
+- `delete-agent`: Delete saved agent
+- `config`: Manage configuration
+
+**Example Workflow:**
+
+```bash
+# 1. Create research agent
+python cli.py create-agent \
+  --name DeepResearch \
+  --thinking-mode \
+  --thinking-depth 3 \
+  --save
+
+# 2. Add MCP tools
+python cli.py add-mcp --directory ./research_tools --agent DeepResearch
+python cli.py add-mcp --url https://mcp.example.com/api --agent DeepResearch
+
+# 3. Run research queries
+python cli.py run \
+  --agent DeepResearch \
+  --query "Analyze quantum computing trends" \
+  --verbose
+
+# 4. List everything
+python cli.py list-agents --details
+python cli.py list-mcp --agent DeepResearch
+```
+
+**Benefits:**
+
+- ✅ **No coding required**: Use FourierSDK from command line
+- ✅ **Agent persistence**: Save and reuse agent configurations
+- ✅ **MCP integration**: Easily manage MCP tools
+- ✅ **Interactive mode**: REPL-style interface
+- ✅ **Scriptable**: Use in bash scripts and automation
+- ✅ **Configuration management**: JSON-based config storage
+
+See [CLI.md](CLI.md) for complete CLI documentation.
 
 ### Function Calling
 
@@ -252,8 +357,137 @@ for step in response['intermediate_steps']:
 - **Configurable Behavior**: Control iterations, error handling, verbosity, and more
 - **Intermediate Steps**: Track what tools were used and when
 - **Error Resilience**: Continue execution even when tools fail
+- **Thinking Mode**: Deep research capability with automatic web searches
+
+**Thinking Mode - Deep Research:**
+
+Agents can enable Thinking Mode to perform deep research before answering queries:
+
+```python
+from agent import Agent, AgentConfig
+
+# Create agent with thinking mode enabled
+agent = Agent(
+    client=client,
+    name="ResearchAgent",
+    model="mixtral-8x7b-32768",
+    config=AgentConfig(
+        thinking_mode=True,              # Enable deep research
+        thinking_depth=2,                # Number of research queries
+        thinking_web_search_results=5,   # Results per query
+        verbose=True
+    )
+)
+
+# Ask a research question - agent will automatically search the web
+response = agent.run("What are the latest developments in quantum computing?")
+print(response["output"])
+```
+
+Thinking Mode automatically:
+1. Generates diverse search queries based on the question
+2. Performs web searches for each query
+3. Gathers and compiles research context
+4. Synthesizes information from multiple sources
+5. Provides comprehensive, well-researched answers
 
 See [AGENT.md](AGENT.md) for complete documentation and advanced examples.
+
+**Production-Grade Features:**
+
+Thinking Mode includes enterprise-ready features:
+- ✅ **Input sanitization**: Automatic query validation and cleaning
+- ✅ **Rate limiting**: Built-in delays prevent API abuse
+- ✅ **Context management**: Automatic truncation prevents token limits
+- ✅ **Error resilience**: Graceful degradation with partial results
+- ✅ **Performance monitoring**: Detailed timing and success metrics
+- ✅ **Configuration validation**: Auto-correction of invalid parameters
+
+See [PRODUCTION_FEATURES.md](PRODUCTION_FEATURES.md) for comprehensive production features documentation.
+
+### Model Context Protocol (MCP)
+
+FourierSDK includes comprehensive support for the Model Context Protocol (MCP), allowing you to connect your agents and applications to external tools and data sources through a standardized protocol.
+
+**What is MCP?**
+
+The Model Context Protocol is an open protocol that standardizes how AI applications connect with external tools and data sources. It enables seamless integration with:
+
+- Remote MCP servers via HTTP/HTTPS
+- Local MCP servers via subprocess (stdio)
+- Directory-based tool loading
+- Configuration-based tool management
+
+**Quick MCP Example:**
+
+```python
+from fourier import Fourier
+from agent import Agent
+
+# Create agent
+client = Fourier(api_key="...", provider="groq")
+agent = Agent(client=client, model="mixtral-8x7b-32768")
+
+# Register MCP tools from different sources
+agent.register_mcp_url("https://mcp.example.com/api")  # Remote server
+agent.register_mcp_config("./mcp_config.json")         # Config file
+agent.register_mcp_directory("./mcp_tools")            # Local directory
+
+# Agent now has access to all MCP tools
+response = agent.run("Use the available tools to complete this task")
+```
+
+**Three Ways to Connect:**
+
+1. **Remote MCP Server (URL)**:
+   ```python
+   agent.register_mcp_url("https://mcp.example.com/api")
+   ```
+
+2. **Configuration File** (Compatible with Claude Desktop format):
+   ```python
+   agent.register_mcp_config("./mcp_config.json")
+   ```
+
+3. **Local Tool Directories**:
+   ```python
+   agent.register_mcp_directory("./mcp_tools")
+   # Or multiple directories
+   agent.register_mcp_directories(["./tools1", "./tools2", "./tools3"])
+   ```
+
+**Creating MCP Tools:**
+
+Create a tool file in your MCP directory:
+
+```python
+# mcp_tools/calculator/tool.py
+
+def calculate(operation: str, a: float, b: float) -> float:
+    """Perform arithmetic operations."""
+    if operation == "add":
+        return a + b
+    elif operation == "multiply":
+        return a * b
+    return 0
+
+MCP_TOOLS = [{
+    "name": "calculator",
+    "description": "Perform arithmetic operations",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "operation": {"type": "string"},
+            "a": {"type": "number"},
+            "b": {"type": "number"}
+        },
+        "required": ["operation", "a", "b"]
+    },
+    "function": calculate
+}]
+```
+
+See [MCP.md](MCP.md) for complete MCP documentation, configuration formats, and advanced examples.
 
 ### Provider-Specific Examples
 
@@ -318,9 +552,14 @@ print(response["response"]["output"])
 
 - **Multi-Provider Support**: Easily switch between Groq, Together AI, OpenAI, Anthropic, Perplexity, and Nebius
 - **Standardized Response Format**: Consistent response structure regardless of the provider
+- **Command Line Interface (CLI)**: Comprehensive CLI for managing agents and MCP tools without writing code
 - **Function Calling**: Define and use functions/tools with JSON schema validation
 - **Internet Search**: Augment LLM responses with up-to-date information from the web
 - **Autonomous Agents**: Create agents that automatically use tools and manage conversations
+- **Thinking Mode**: Deep research capability with automatic multi-query web searches and synthesis
+- **Model Context Protocol (MCP)**: Connect to remote MCP servers, load tools from directories, and use Claude Desktop-compatible configurations
+- **Interactive Shell**: REPL-style interface for agent interaction and management
+- **Agent Persistence**: Save and load agent configurations with JSON storage
 - **Conversation Management**: Built-in conversation history and context management
 - **Customizable Base URLs**: For enterprise deployments or custom endpoints
 - **Token Usage Tracking**: Monitor token consumption across providers
@@ -328,6 +567,7 @@ print(response["response"]["output"])
 - **Error Handling**: Comprehensive exception hierarchy for precise error handling
 - **Logging**: Production-ready logging framework
 - **Configurable Behavior**: Fine-tune agent iterations, timeouts, and error handling
+- **Scriptable**: Use CLI in automation and CI/CD pipelines
 
 ## API Reference
 

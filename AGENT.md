@@ -118,7 +118,10 @@ config = AgentConfig(
     max_tokens=None,                 # Max response tokens
     stop_on_error=False,             # Stop on tool errors
     return_intermediate_steps=True,  # Return execution steps
-    timeout_seconds=None             # Max execution time
+    timeout_seconds=None,            # Max execution time
+    thinking_mode=False,             # Enable deep research mode
+    thinking_depth=2,                # Number of research queries (1-5)
+    thinking_web_search_results=5    # Results per search query
 )
 
 agent = Agent(client=client, config=config)
@@ -330,6 +333,147 @@ response = agent.run("Do something that might fail")
 if not response["success"]:
     print(f"Error: {response.get('error')}")
 ```
+
+### Thinking Mode - Deep Research
+
+Thinking Mode enables agents to perform deep research by automatically conducting multiple web searches before answering queries. This is particularly useful for:
+
+- Research-heavy questions requiring up-to-date information
+- Complex queries needing multiple perspectives
+- Fact-checking and verification tasks
+- Comprehensive analysis requiring diverse sources
+
+**How Thinking Mode Works:**
+
+1. Agent receives a user query
+2. LLM generates multiple diverse search queries based on the question
+3. Web searches are performed for each generated query
+4. Research context is gathered and compiled
+5. Enhanced prompt with research context is sent to LLM
+6. Agent synthesizes information and provides comprehensive answer
+
+**Basic Usage:**
+
+```python
+from agent import Agent, AgentConfig
+
+config = AgentConfig(
+    thinking_mode=True,              # Enable thinking mode
+    thinking_depth=2,                # Number of research queries
+    thinking_web_search_results=5,   # Results per query
+    verbose=True                      # Show research process
+)
+
+agent = Agent(
+    client=client,
+    name="ResearchAgent",
+    system_prompt="You are a knowledgeable research assistant.",
+    model="mixtral-8x7b-32768",
+    config=config
+)
+
+# Ask research question
+response = agent.run("What are the latest developments in quantum computing?")
+print(response["output"])
+```
+
+**Configuration Parameters:**
+
+- `thinking_mode` (bool): Enable/disable thinking mode (default: False)
+- `thinking_depth` (int): Number of research queries to generate, clamped between 1-5 (default: 2)
+- `thinking_web_search_results` (int): Number of search results to retrieve per query (default: 5)
+
+**Advanced Example:**
+
+```python
+# Deep research with multiple queries
+config = AgentConfig(
+    thinking_mode=True,
+    thinking_depth=4,                 # More comprehensive research
+    thinking_web_search_results=8,    # More results per search
+    verbose=True,
+    max_iterations=10
+)
+
+agent = Agent(client=client, config=config)
+
+questions = [
+    "What are the key challenges in AGI development?",
+    "How is edge computing transforming IoT?",
+    "What are recent breakthroughs in fusion energy?"
+]
+
+for question in questions:
+    response = agent.run(question)
+    print(f"\nQ: {question}")
+    print(f"A: {response['output']}\n")
+```
+
+**Combining Thinking Mode with Tools:**
+
+```python
+# Create agent with both thinking mode and custom tools
+agent = Agent(
+    client=client,
+    config=AgentConfig(
+        thinking_mode=True,
+        thinking_depth=2,
+        auto_execute_tools=True
+    )
+)
+
+# Register custom analysis tool
+def analyze_data(data: str) -> dict:
+    return {"analysis": "detailed_results"}
+
+agent.register_tool(
+    name="analyze",
+    description="Analyze data",
+    parameters={...},
+    function=analyze_data
+)
+
+# Agent will research AND use tools as needed
+response = agent.run("Research AI trends and analyze the data")
+```
+
+**Best Practices for Thinking Mode:**
+
+1. **Use for Research Questions**: Enable thinking mode for queries requiring current information
+2. **Adjust Depth Based on Complexity**: Simple questions need depth=1-2, complex topics benefit from depth=3-4
+3. **Monitor Performance**: Thinking mode adds latency due to web searches
+4. **Combine with Appropriate Models**: Use capable models like Mixtral or GPT-4 for synthesis
+5. **Disable for Simple Tasks**: Don't use thinking mode for basic calculations or predefined knowledge
+
+**When to Use Thinking Mode:**
+
+✅ Research questions requiring current information
+✅ Complex topics needing multiple perspectives
+✅ Fact-checking and verification
+✅ Comprehensive analysis tasks
+
+❌ Simple calculations or logic
+❌ Questions about static/historical knowledge
+❌ Time-sensitive real-time applications
+❌ Tasks with strict latency requirements
+
+See `examples/thinking_mode_example.py` for complete working examples.
+
+**Production-Grade Thinking Mode:**
+
+Thinking Mode includes enterprise-ready features for production deployments:
+
+- **Input Sanitization**: All queries are validated, sanitized, and length-checked
+- **Rate Limiting**: Automatic 1-second delays between searches prevent API abuse
+- **Context Management**: Results truncated at 50,000 characters to prevent token limits
+- **Error Handling**: Graceful degradation with partial results on failures
+- **Metrics Tracking**: Detailed timing, success rates, and performance logs
+- **Configuration Validation**: Invalid parameters auto-corrected with warnings
+- **Security**: Protection against XSS, injection, and resource exhaustion attacks
+
+For detailed information on production features, see [PRODUCTION_FEATURES.md](PRODUCTION_FEATURES.md).
+
+For comprehensive test coverage, see `tests/test_thinking_mode.py` (40+ unit tests).
 
 ## Examples
 

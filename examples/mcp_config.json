@@ -1,0 +1,36 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "python",
+      "args": ["-m", "mcp_server_filesystem"],
+      "env": {
+        "ROOT_PATH": "/home/user/documents",
+        "ALLOWED_OPERATIONS": "read,write,list"
+      }
+    },
+    "database": {
+      "command": "node",
+      "args": ["./mcp_servers/database_server.js"],
+      "env": {
+        "DB_CONNECTION": "postgresql://localhost:5432/mydb",
+        "DB_USER": "user",
+        "DB_PASSWORD": "password"
+      }
+    },
+    "web_api": {
+      "url": "https://mcp.example.com/api/v1",
+      "headers": {
+        "Authorization": "Bearer YOUR_API_TOKEN_HERE",
+        "Content-Type": "application/json"
+      }
+    },
+    "search_engine": {
+      "command": "python",
+      "args": ["-m", "mcp_search_server"],
+      "env": {
+        "SEARCH_API_KEY": "YOUR_SEARCH_API_KEY",
+        "MAX_RESULTS": "10"
+      }
+    }
+  }
+}
