@@ -1,7 +1,7 @@
 """
-ThinkSDK - Unified LLM Provider Interface
+FourierSDK - Unified LLM Provider Interface
 
-This module provides the main Think class for interacting with multiple LLM providers
+This module provides the main Fourier class for interacting with multiple LLM providers
 through a standardized interface.
 """
 
@@ -30,12 +30,12 @@ from exceptions import (
 logger = logging.getLogger(__name__)
 
 
-class Think:
+class Fourier:
     """
-    Main class for interacting with LLM providers.
+    Main SDK client for interacting with LLM providers.
 
     Provides a unified interface for chat completions across multiple
-    LLM providers with support for tool calling and internet search.
+    LLM providers with support for function calling and internet search.
     """
 
     def __init__(
@@ -46,7 +46,7 @@ class Think:
         **provider_kwargs
     ):
         """
-        Initialize the Think SDK.
+        Initialize the Fourier SDK client.
 
         Args:
             api_key: API key for the LLM provider
@@ -56,7 +56,8 @@ class Think:
             **provider_kwargs: Additional provider-specific arguments
 
         Raises:
-            ValueError: If API key is empty or provider is unsupported
+            InvalidAPIKeyError: If API key is empty or invalid
+            UnsupportedProviderError: If provider is not supported
         """
         if not api_key or not api_key.strip():
             raise InvalidAPIKeyError("API key cannot be empty")
@@ -89,7 +90,7 @@ class Think:
 
     def chat(self, **kwargs) -> Dict[str, Any]:
         """
-        Create a chat completion.
+        Create a chat completion request.
 
         Args:
             model: The model to use
@@ -117,8 +118,8 @@ class Think:
             }
 
         Raises:
-            requests.HTTPError: If the API request fails
-            ValueError: If required parameters are missing
+            ProviderAPIError: If the API request fails
+            InvalidRequestError: If required parameters are missing
         """
         # Handle internet search if enabled
         internet_search = kwargs.pop("internet_search", False)
@@ -280,7 +281,7 @@ class Think:
         required: Optional[List[str]] = None
     ) -> Tool:
         """
-        Create a new tool definition.
+        Create a new function/tool definition for the model.
 
         Args:
             name: Name of the tool
@@ -292,8 +293,8 @@ class Think:
             Tool object that can be passed to the chat() method
 
         Example:
-            >>> think = Think(api_key="...", provider="groq")
-            >>> calculator = think.create_tool(
+            >>> client = Fourier(api_key="...", provider="groq")
+            >>> calculator = client.create_tool(
             ...     name="calculator",
             ...     description="Performs basic arithmetic",
             ...     parameters={

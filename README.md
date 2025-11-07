@@ -1,6 +1,6 @@
-# ThinkSDK
+# FourierSDK
 
-A Python SDK for accessing Large Language Models (LLMs) from various inference providers like Groq, Together AI, OpenAI, Anthropic, Perplexity, and Nebius. ThinkSDK follows a similar pattern to the OpenAI SDK while adding support for tools, internet search, and multiple providers with a standardized response format.
+A Python SDK for accessing Large Language Models (LLMs) from various inference providers like Groq, Together AI, OpenAI, Anthropic, Perplexity, and Nebius. FourierSDK provides a unified interface similar to the OpenAI SDK while adding support for function calling, internet search, autonomous agents, and multiple providers with standardized response formats.
 
 ## Table of Contents
 
@@ -9,9 +9,10 @@ A Python SDK for accessing Large Language Models (LLMs) from various inference p
   - [API Keys](#api-keys)
   - [Environment Variables](#environment-variables)
 - [Usage](#usage)
-  - [Basic Usage](#basic-usage)
-  - [Using Tools](#using-tools)
+  - [Quick Start](#quick-start)
+  - [Function Calling](#function-calling)
   - [Internet Search](#internet-search)
+  - [Autonomous Agents](#autonomous-agents)
   - [Provider-Specific Examples](#provider-specific-examples)
 - [Features](#features)
 - [API Reference](#api-reference)
@@ -33,11 +34,17 @@ cd SDK-main
 pip install -r requirements.txt
 ```
 
+Or install via pip (once published):
+
+```bash
+pip install fourier-sdk
+```
+
 ## Setup
 
 ### API Keys
 
-ThinkSDK supports multiple LLM providers, each requiring its own API key:
+FourierSDK supports multiple LLM providers, each requiring its own API key:
 
 - **Groq**: Get an API key from [Groq](https://console.groq.com/)
 - **Together AI**: Get an API key from [Together AI](https://www.together.ai/)
@@ -45,7 +52,6 @@ ThinkSDK supports multiple LLM providers, each requiring its own API key:
 - **Anthropic**: Get an API key from [Anthropic](https://console.anthropic.com/)
 - **Perplexity**: Get an API key from [Perplexity](https://www.perplexity.ai/)
 - **Nebius**: Get an API key from [Nebius](https://nebius.ai/)
-- **OpenRouter**: Get an API key from [OpenRouter](https://openrouter.ai/)
 
 ### Environment Variables
 
@@ -59,22 +65,21 @@ OPENAI_API_KEY=your_openai_api_key_here
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
 PERPLEXITY_API_KEY=your_perplexity_api_key_here
 NEBIUS_API_KEY=your_nebius_api_key_here
-OPENROUTER_API_KEY=your_openrouter_api_key_here
 ```
 
 **Important**: Never commit your `.env` file to version control. It's already added to `.gitignore`.
 
 ## Usage
 
-### Basic Usage
+### Quick Start
 
 ```python
-from think import Think
+from fourier import Fourier
 import os
 
-# Initialize the SDK with environment variable
+# Initialize the SDK client
 api_key = os.getenv("GROQ_API_KEY")
-client = Think(api_key=api_key, provider="groq")
+client = Fourier(api_key=api_key, provider="groq")
 
 # Create a chat completion
 response = client.chat(
@@ -84,34 +89,47 @@ response = client.chat(
     ]
 )
 
-print(response["choices"][0]["message"]["content"])
+# Access the response
+print(response["response"]["output"])
 
 # Access token usage information
 usage = response.get("usage", {})
-print(f"Token Usage: {usage.get('input_tokens', 0)} input / {usage.get('output_tokens', 0)} output / {usage.get('total_tokens', 0)} total")
+print(f"Tokens: {usage.get('input_tokens', 0)} in / {usage.get('output_tokens', 0)} out")
 ```
 
-### Using Tools
+### Function Calling
+
+FourierSDK supports function/tool calling across multiple providers:
 
 ```python
-from think import Think
+from fourier import Fourier
 import os
 
-# Initialize the SDK
+# Initialize the SDK client
 api_key = os.getenv("TOGETHER_API_KEY")
-client = Think(api_key=api_key, provider="together")
+client = Fourier(api_key=api_key, provider="together")
 
-# Create a tool
+# Define a function/tool
 calculator = client.create_tool(
     name="calculator",
     description="A simple calculator that can perform basic arithmetic operations",
     parameters={
-        "operation": {
-            "type": "string",
-            "enum": ["add", "subtract", "multiply", "divide"]
-        },
-        "a": {"type": "number"},
-        "b": {"type": "number"}
+        "type": "object",
+        "properties": {
+            "operation": {
+                "type": "string",
+                "enum": ["add", "subtract", "multiply", "divide"],
+                "description": "The arithmetic operation to perform"
+            },
+            "a": {
+                "type": "number",
+                "description": "First number"
+            },
+            "b": {
+                "type": "number",
+                "description": "Second number"
+            }
+        }
     },
     required=["operation", "a", "b"]
 )
@@ -120,25 +138,25 @@ calculator = client.create_tool(
 response = client.chat(
     model="mistralai/Mixtral-8x7B-Instruct-v0.1",
     messages=[
-        {"role": "user", "content": "What is 5 + 3?"}
+        {"role": "user", "content": "What is 25 multiplied by 4?"}
     ],
     tools=[calculator]
 )
 
-print(response["choices"][0]["message"]["content"])
+print(response)
 ```
 
 ### Internet Search
 
-ThinkSDK supports internet search capabilities, allowing the LLM to access up-to-date information from the web:
+FourierSDK supports internet search capabilities, allowing the LLM to access up-to-date information from the web:
 
 ```python
-from think import Think
+from fourier import Fourier
 import os
 
-# Initialize the SDK
+# Initialize the SDK client
 api_key = os.getenv("TOGETHER_API_KEY")
-client = Think(api_key=api_key, provider="together")
+client = Fourier(api_key=api_key, provider="together")
 
 # Use internet search in a chat completion
 response = client.chat(
@@ -147,10 +165,15 @@ response = client.chat(
         {"role": "user", "content": "What are the latest developments in AI in 2025?"}
     ],
     internet_search=True,  # Enable internet search
-    search_results_count=3  # Number of search results to use
+    search_results=3  # Number of search results to use
 )
 
-print(response["choices"][0]["message"]["content"])
+print(response["response"]["output"])
+
+# Access search metadata
+if "search_metadata" in response.get("response", {}):
+    print(f"Search query: {response['response']['search_metadata']['query']}")
+    print(f"Sources: {response['response'].get('citations', [])}")
 ```
 
 You can also specify a custom search query:
@@ -159,23 +182,89 @@ You can also specify a custom search query:
 response = client.chat(
     model="mistralai/Mixtral-8x7B-Instruct-v0.1",
     messages=[
-        {"role": "user", "content": "Tell me about the weather in New York"}
+        {"role": "user", "content": "Tell me about the weather"}
     ],
     internet_search=True,
     search_query="current weather forecast New York City"  # Custom search query
 )
 ```
 
+### Autonomous Agents
+
+FourierSDK includes a powerful Agent framework for creating autonomous agents that can use tools, manage conversations, and execute complex workflows automatically.
+
+```python
+from fourier import Fourier
+from agent import Agent, AgentConfig
+import os
+
+# Create Fourier client
+client = Fourier(api_key=os.getenv("GROQ_API_KEY"), provider="groq")
+
+# Create an agent
+agent = Agent(
+    client=client,
+    name="MathAssistant",
+    system_prompt="You are a helpful math assistant. Use tools when needed.",
+    model="mixtral-8x7b-32768",
+    config=AgentConfig(verbose=True, return_intermediate_steps=True)
+)
+
+# Define and register a tool
+def calculator(operation: str, a: float, b: float) -> float:
+    """Perform arithmetic operations."""
+    if operation == "add":
+        return a + b
+    elif operation == "multiply":
+        return a * b
+    return 0
+
+agent.register_tool(
+    name="calculator",
+    description="Perform arithmetic operations: add, subtract, multiply, divide",
+    parameters={
+        "type": "object",
+        "properties": {
+            "operation": {"type": "string", "enum": ["add", "multiply"]},
+            "a": {"type": "number"},
+            "b": {"type": "number"}
+        }
+    },
+    required=["operation", "a", "b"],
+    function=calculator
+)
+
+# Run the agent - it will automatically use tools as needed
+response = agent.run("What is 25 times 4, then add 10?")
+
+print(f"Answer: {response['output']}")
+print(f"Tool calls made: {response['tool_calls']}")
+print(f"Iterations: {response['iterations']}")
+
+# View intermediate steps
+for step in response['intermediate_steps']:
+    print(f"Step: {step['tool']}({step['parameters']}) = {step['result']}")
+```
+
+**Key Agent Features:**
+- **Automatic Tool Execution**: Agents automatically execute tools when the LLM requests them
+- **Conversation Memory**: Maintains context across multiple interactions
+- **Configurable Behavior**: Control iterations, error handling, verbosity, and more
+- **Intermediate Steps**: Track what tools were used and when
+- **Error Resilience**: Continue execution even when tools fail
+
+See [AGENT.md](AGENT.md) for complete documentation and advanced examples.
+
 ### Provider-Specific Examples
 
 #### OpenAI
 
 ```python
-from think import Think
+from fourier import Fourier
 import os
 
 api_key = os.getenv("OPENAI_API_KEY")
-client = Think(api_key=api_key, provider="openai")
+client = Fourier(api_key=api_key, provider="openai")
 
 response = client.chat(
     model="gpt-4",
@@ -184,17 +273,17 @@ response = client.chat(
     ]
 )
 
-print(response["choices"][0]["message"]["content"])
+print(response["response"]["output"])
 ```
 
 #### Anthropic
 
 ```python
-from think import Think
+from fourier import Fourier
 import os
 
 api_key = os.getenv("ANTHROPIC_API_KEY")
-client = Think(api_key=api_key, provider="anthropic")
+client = Fourier(api_key=api_key, provider="anthropic")
 
 response = client.chat(
     model="claude-3-opus-20240229",
@@ -203,17 +292,17 @@ response = client.chat(
     ]
 )
 
-print(response["choices"][0]["message"]["content"])
+print(response["response"]["output"])
 ```
 
 #### Perplexity
 
 ```python
-from think import Think
+from fourier import Fourier
 import os
 
 api_key = os.getenv("PERPLEXITY_API_KEY")
-client = Think(api_key=api_key, provider="perplexity")
+client = Fourier(api_key=api_key, provider="perplexity")
 
 response = client.chat(
     model="sonar-medium-online",
@@ -222,34 +311,109 @@ response = client.chat(
     ]
 )
 
-print(response["choices"][0]["message"]["content"])
+print(response["response"]["output"])
 ```
 
 ## Features
 
 - **Multi-Provider Support**: Easily switch between Groq, Together AI, OpenAI, Anthropic, Perplexity, and Nebius
 - **Standardized Response Format**: Consistent response structure regardless of the provider
-- **Tool Support**: Define and use tools with schema validation
+- **Function Calling**: Define and use functions/tools with JSON schema validation
 - **Internet Search**: Augment LLM responses with up-to-date information from the web
+- **Autonomous Agents**: Create agents that automatically use tools and manage conversations
+- **Conversation Management**: Built-in conversation history and context management
 - **Customizable Base URLs**: For enterprise deployments or custom endpoints
 - **Token Usage Tracking**: Monitor token consumption across providers
 - **Type Hints**: Full type annotations for better IDE support
+- **Error Handling**: Comprehensive exception hierarchy for precise error handling
+- **Logging**: Production-ready logging framework
+- **Configurable Behavior**: Fine-tune agent iterations, timeouts, and error handling
 
 ## API Reference
 
-### Think Class
+### Fourier Class
 
-The main class for interacting with LLM providers.
+The main SDK client for interacting with LLM providers.
+
+#### Constructor
+
+```python
+Fourier(
+    api_key: str,
+    provider: str = "groq",
+    base_url: Optional[str] = None,
+    **provider_kwargs
+)
+```
+
+**Parameters:**
+- `api_key`: API key for the LLM provider
+- `provider`: Provider name (default: "groq"). Supported: groq, together, nebius, openai, anthropic, perplexity
+- `base_url`: Custom base URL for the API (optional)
+- `**provider_kwargs`: Additional provider-specific arguments
 
 #### Methods
 
-- `__init__(api_key: str, provider: str = "groq", base_url: Optional[str] = None, **provider_kwargs)`
-- `chat(model: str, messages: List[Dict[str, Any]], temperature: float = 0.7, max_tokens: Optional[int] = None, tools: Optional[List[Tool]] = None, internet_search: bool = False, search_query: Optional[str] = None, search_results_count: int = 3, **kwargs) -> Dict[str, Any]`
-- `create_tool(name: str, description: str, parameters: Dict[str, Any], required: List[str] = None) -> Tool`
+##### chat()
+
+Create a chat completion request.
+
+```python
+client.chat(
+    model: str,
+    messages: List[Dict[str, str]],
+    temperature: float = 0.7,
+    max_tokens: Optional[int] = None,
+    tools: Optional[List[Tool]] = None,
+    internet_search: bool = False,
+    search_query: Optional[str] = None,
+    search_results: int = 3,
+    **kwargs
+) -> Dict[str, Any]
+```
+
+**Returns:** Standardized response dictionary with structure:
+```python
+{
+    "status": "success",
+    "timestamp": "2024-01-01T12:00:00Z",
+    "metadata": {
+        "request_id": "...",
+        "model": "...",
+        "provider": "...",
+        "response_type": "text" | "tool_call",
+        "latency_ms": 123
+    },
+    "response": {
+        "type": "text",
+        "output": "...",
+        "citations": [...] # if internet_search=True
+    },
+    "usage": {
+        "input_tokens": 10,
+        "output_tokens": 20,
+        "total_tokens": 30
+    },
+    "error": None
+}
+```
+
+##### create_tool()
+
+Create a new function/tool definition.
+
+```python
+client.create_tool(
+    name: str,
+    description: str,
+    parameters: Dict[str, Any],
+    required: Optional[List[str]] = None
+) -> Tool
+```
 
 ### Tool Class
 
-A class for defining tools that can be used by the LLM.
+A class for defining functions/tools that can be used by the LLM.
 
 #### Attributes
 
@@ -265,17 +429,31 @@ A class for defining tools that can be used by the LLM.
 - **API Key Issues**: Ensure your API keys are correctly set in the `.env` file and loaded properly
 - **Model Availability**: Different providers support different models; check provider documentation
 - **Rate Limiting**: If you encounter rate limit errors, reduce request frequency or upgrade your API plan
-- **Internet Search Failures**: Check your internet connection and ensure you're using supported providers
+- **Internet Search Failures**: Check your internet connection and ensure DuckDuckGo is accessible
 
 ### Debugging
 
-Set up logging to debug issues:
+Enable debug logging to troubleshoot issues:
 
 ```python
 import logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 ```
+
+### Custom Exceptions
+
+FourierSDK provides custom exceptions for precise error handling:
+
+- `FourierSDKError`: Base exception class
+- `InvalidAPIKeyError`: Invalid or missing API key
+- `UnsupportedProviderError`: Unsupported provider specified
+- `ProviderAPIError`: Provider API returned an error
+- `ToolExecutionError`: Tool/function execution failed
+- `WebSearchError`: Web search operation failed
 
 ## License
 
-MIT
+MIT License - see LICENSE file for details
