@@ -3,7 +3,7 @@ FourierSDK - Unified LLM Provider Interface
 
 A Python SDK for accessing multiple Large Language Model providers
 with a standardized interface, function calling support, internet search capabilities,
-and autonomous agent framework.
+autonomous agent framework, assistants, and workflow orchestration.
 """
 
 from fourier import Fourier
@@ -11,8 +11,10 @@ from models import Tool, ChatCompletionRequest
 from response_normalizer import ResponseNormalizer
 from web_search import WebSearch
 from agent import Agent, AgentConfig
+from assistant import Assistant, AssistantConfig
+from workflow import Workflow, WorkflowNode, NodeType, ExecutionStatus
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "Fourier",
@@ -22,4 +24,10 @@ __all__ = [
     "WebSearch",
     "Agent",
     "AgentConfig",
+    "Assistant",
+    "AssistantConfig",
+    "Workflow",
+    "WorkflowNode",
+    "NodeType",
+    "ExecutionStatus",
 ]
