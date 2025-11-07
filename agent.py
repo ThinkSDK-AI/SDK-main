@@ -9,6 +9,10 @@ from typing import List, Dict, Any, Optional, Callable, Union
 from dataclasses import dataclass, field
 import logging
 import json
+import time
+import hashlib
+import re
+from functools import lru_cache
 from fourier import Fourier
 from models import Tool
 from exceptions import ToolExecutionError, InvalidRequestError
@@ -16,6 +20,17 @@ from mcp import MCPClient
 from web_search import web_search
 
 logger = logging.getLogger(__name__)
+
+# Production safety constants
+MAX_THINKING_DEPTH = 5
+MIN_THINKING_DEPTH = 1
+MAX_SEARCH_RESULTS = 10
+MIN_SEARCH_RESULTS = 1
+MAX_CONTEXT_LENGTH = 50000  # Characters
+SEARCH_TIMEOUT = 30  # Seconds per search
+QUERY_GENERATION_TIMEOUT = 15  # Seconds
+MAX_QUERY_LENGTH = 500  # Characters
+RATE_LIMIT_DELAY = 1.0  # Seconds between searches
 
 
 @dataclass
@@ -60,6 +75,48 @@ class AgentConfig:
 
     thinking_web_search_results: int = 5
     """Number of web search results to retrieve per query in thinking mode."""
+
+    def __post_init__(self):
+        """Validate configuration parameters."""
+        # Validate max_iterations
+        if self.max_iterations < 1:
+            logger.warning(f"max_iterations must be >= 1, got {self.max_iterations}. Setting to 1.")
+            self.max_iterations = 1
+        elif self.max_iterations > 100:
+            logger.warning(f"max_iterations > 100 may cause performance issues. Got {self.max_iterations}.")
+
+        # Validate max_tool_calls_per_iteration
+        if self.max_tool_calls_per_iteration < 1:
+            logger.warning(f"max_tool_calls_per_iteration must be >= 1, got {self.max_tool_calls_per_iteration}. Setting to 1.")
+            self.max_tool_calls_per_iteration = 1
+
+        # Validate temperature
+        if not 0.0 <= self.temperature <= 2.0:
+            logger.warning(f"temperature should be between 0.0 and 2.0, got {self.temperature}. Clamping.")
+            self.temperature = max(0.0, min(2.0, self.temperature))
+
+        # Validate thinking_depth
+        if self.thinking_mode:
+            if self.thinking_depth < MIN_THINKING_DEPTH:
+                logger.warning(f"thinking_depth must be >= {MIN_THINKING_DEPTH}, got {self.thinking_depth}. Setting to {MIN_THINKING_DEPTH}.")
+                self.thinking_depth = MIN_THINKING_DEPTH
+            elif self.thinking_depth > MAX_THINKING_DEPTH:
+                logger.warning(f"thinking_depth must be <= {MAX_THINKING_DEPTH}, got {self.thinking_depth}. Setting to {MAX_THINKING_DEPTH}.")
+                self.thinking_depth = MAX_THINKING_DEPTH
+
+        # Validate thinking_web_search_results
+        if self.thinking_mode:
+            if self.thinking_web_search_results < MIN_SEARCH_RESULTS:
+                logger.warning(f"thinking_web_search_results must be >= {MIN_SEARCH_RESULTS}, got {self.thinking_web_search_results}. Setting to {MIN_SEARCH_RESULTS}.")
+                self.thinking_web_search_results = MIN_SEARCH_RESULTS
+            elif self.thinking_web_search_results > MAX_SEARCH_RESULTS:
+                logger.warning(f"thinking_web_search_results must be <= {MAX_SEARCH_RESULTS}, got {self.thinking_web_search_results}. Setting to {MAX_SEARCH_RESULTS}.")
+                self.thinking_web_search_results = MAX_SEARCH_RESULTS
+
+        # Validate timeout_seconds
+        if self.timeout_seconds is not None and self.timeout_seconds < 1:
+            logger.warning(f"timeout_seconds must be >= 1 or None, got {self.timeout_seconds}. Setting to None.")
+            self.timeout_seconds = None
 
 
 class Agent:
@@ -457,12 +514,202 @@ class Agent:
             f"Result: {result}"
         )
 
+    @staticmethod
+    def _sanitize_query(query: str) -> Optional[str]:
+        """
+        Sanitize and validate a search query.
+
+        Args:
+            query: Raw search query
+
+        Returns:
+            Sanitized query or None if invalid
+        """
+        if not query or not isinstance(query, str):
+            return None
+
+        # Remove excessive whitespace
+        sanitized = ' '.join(query.split())
+
+        # Remove leading/trailing whitespace
+        sanitized = sanitized.strip()
+
+        # Check length
+        if len(sanitized) < 2 or len(sanitized) > MAX_QUERY_LENGTH:
+            logger.warning(f"Query length out of bounds: {len(sanitized)}")
+            if len(sanitized) > MAX_QUERY_LENGTH:
+                sanitized = sanitized[:MAX_QUERY_LENGTH]
+            else:
+                return None
+
+        # Remove potentially harmful characters but keep basic punctuation
+        # Allow alphanumeric, spaces, and basic punctuation
+        if not re.match(r'^[\w\s\-.,!?\'"():]+$', sanitized, re.UNICODE):
+            logger.warning(f"Query contains suspicious characters: {sanitized[:50]}")
+            # Remove suspicious characters
+            sanitized = re.sub(r'[^\w\s\-.,!?\'"():]', '', sanitized, flags=re.UNICODE)
+
+        return sanitized if sanitized else None
+
+    @staticmethod
+    def _truncate_context(context: str, max_length: int = MAX_CONTEXT_LENGTH) -> str:
+        """
+        Truncate research context to prevent token limit issues.
+
+        Args:
+            context: Research context string
+            max_length: Maximum length in characters
+
+        Returns:
+            Truncated context
+        """
+        if len(context) <= max_length:
+            return context
+
+        logger.warning(f"Context truncated from {len(context)} to {max_length} characters")
+
+        # Truncate and add notice
+        truncated = context[:max_length]
+        truncated += "\n\n[Context truncated due to length...]"
+
+        return truncated
+
+    def _generate_search_queries(self, user_input: str, depth: int) -> List[str]:
+        """
+        Generate diverse search queries using LLM.
+
+        Args:
+            user_input: User's original query
+            depth: Number of queries to generate
+
+        Returns:
+            List of sanitized search queries
+
+        Raises:
+            ToolExecutionError: If query generation fails
+        """
+        try:
+            # Sanitize user input first
+            safe_input = self._sanitize_query(user_input)
+            if not safe_input:
+                logger.error("[Thinking Mode] Invalid user input for query generation")
+                return [user_input[:MAX_QUERY_LENGTH]]  # Fallback to truncated original
+
+            query_generation_prompt = f"""Given this user question: "{safe_input}"
+
+Generate {depth} diverse search queries that would help gather comprehensive information to answer this question.
+Each query should focus on a different aspect or angle of the question.
+
+Requirements:
+- Keep queries concise and specific
+- Focus on factual, verifiable information
+- Avoid redundant queries
+- Return ONLY the queries, one per line, without numbering or explanations."""
+
+            if self.config.verbose:
+                logger.info("[Thinking Mode] Generating research queries...")
+
+            start_time = time.time()
+
+            # Generate queries with timeout
+            response = self.client.chat(
+                model=self.model,
+                messages=[{"role": "user", "content": query_generation_prompt}],
+                temperature=0.7,
+                max_tokens=500
+            )
+
+            elapsed = time.time() - start_time
+
+            if elapsed > QUERY_GENERATION_TIMEOUT:
+                logger.warning(f"[Thinking Mode] Query generation took {elapsed:.2f}s (>{QUERY_GENERATION_TIMEOUT}s)")
+
+            # Extract and sanitize queries
+            queries_text = response.get("response", {}).get("output", "")
+            raw_queries = [q.strip() for q in queries_text.split("\n") if q.strip()]
+
+            # Sanitize each query
+            search_queries = []
+            for raw_query in raw_queries:
+                sanitized = self._sanitize_query(raw_query)
+                if sanitized:
+                    search_queries.append(sanitized)
+
+            # Fallback to user input if no valid queries
+            if not search_queries:
+                logger.warning("[Thinking Mode] No valid queries generated, using original input")
+                fallback = self._sanitize_query(user_input) or user_input[:MAX_QUERY_LENGTH]
+                search_queries = [fallback]
+
+            # Limit to requested depth
+            search_queries = search_queries[:depth]
+
+            if self.config.verbose:
+                logger.info(f"[Thinking Mode] Generated {len(search_queries)} valid queries")
+
+            return search_queries
+
+        except Exception as e:
+            logger.error(f"[Thinking Mode] Query generation failed: {e}", exc_info=True)
+            # Return sanitized fallback
+            fallback = self._sanitize_query(user_input) or user_input[:MAX_QUERY_LENGTH]
+            return [fallback]
+
+    def _perform_single_search(self, query: str, query_num: int, total: int) -> Optional[str]:
+        """
+        Perform a single web search with error handling and rate limiting.
+
+        Args:
+            query: Search query
+            query_num: Current query number (for logging)
+            total: Total number of queries
+
+        Returns:
+            Search results or None if failed
+        """
+        try:
+            if self.config.verbose:
+                logger.info(f"[Thinking Mode] Search {query_num}/{total}: {query[:100]}")
+
+            # Rate limiting
+            if query_num > 1:
+                time.sleep(RATE_LIMIT_DELAY)
+
+            start_time = time.time()
+
+            # Perform search with configured number of results
+            search_results = web_search(
+                query,
+                num_results=self.config.thinking_web_search_results
+            )
+
+            elapsed = time.time() - start_time
+
+            if elapsed > SEARCH_TIMEOUT:
+                logger.warning(f"[Thinking Mode] Search took {elapsed:.2f}s (>{SEARCH_TIMEOUT}s)")
+
+            if search_results:
+                result_len = len(search_results)
+                if self.config.verbose:
+                    logger.info(f"[Thinking Mode] Search completed: {result_len} characters in {elapsed:.2f}s")
+                return search_results
+            else:
+                logger.warning(f"[Thinking Mode] Empty results for query: {query[:50]}")
+                return None
+
+        except Exception as e:
+            logger.error(f"[Thinking Mode] Search failed for '{query[:50]}': {e}", exc_info=True)
+            if self.config.stop_on_error:
+                raise
+            return None
+
     def _perform_thinking_research(self, user_input: str) -> str:
         """
-        Perform deep research using web search for thinking mode.
+        Perform deep research using web search for thinking mode (Production Grade).
 
         This method conducts multiple web searches to gather comprehensive
-        context and information related to the user's query.
+        context and information related to the user's query with robust error
+        handling, rate limiting, input validation, and context management.
 
         Args:
             user_input: The user's input/query
@@ -471,90 +718,79 @@ class Agent:
             Formatted research context string
 
         Raises:
-            Exception: If research fails and stop_on_error is True
+            ToolExecutionError: If research fails and stop_on_error is True
         """
+        # Input validation
+        if not user_input or not isinstance(user_input, str):
+            logger.error("[Thinking Mode] Invalid user input provided")
+            return ""
+
+        if len(user_input) > MAX_QUERY_LENGTH * 5:  # More lenient for original input
+            logger.warning(f"[Thinking Mode] User input very long ({len(user_input)} chars), truncating")
+            user_input = user_input[:MAX_QUERY_LENGTH * 5]
+
         if self.config.verbose:
             logger.info(f"[Thinking Mode] Starting deep research for: {user_input[:100]}...")
 
+        # Track metrics
+        start_time = time.time()
+        successful_searches = 0
+        failed_searches = 0
         research_context = []
 
-        # Clamp thinking depth between 1 and 5
-        depth = max(1, min(5, self.config.thinking_depth))
-
         try:
-            # First, generate research queries based on the user input
-            # Use LLM to generate diverse search queries
-            query_generation_prompt = f"""Given this user question: "{user_input}"
-
-Generate {depth} diverse search queries that would help gather comprehensive information to answer this question.
-Each query should focus on a different aspect or angle of the question.
-
-Return ONLY the queries, one per line, without numbering or explanations."""
-
-            if self.config.verbose:
-                logger.info("[Thinking Mode] Generating research queries...")
-
-            response = self.client.chat(
-                model=self.model,
-                messages=[{"role": "user", "content": query_generation_prompt}],
-                temperature=0.7,
-                max_tokens=500
+            # Generate search queries
+            search_queries = self._generate_search_queries(
+                user_input,
+                self.config.thinking_depth
             )
 
-            # Extract queries from response
-            queries_text = response.get("response", {}).get("output", "")
-            search_queries = [q.strip() for q in queries_text.split("\n") if q.strip()]
-
-            # Fallback to user input if no queries generated
             if not search_queries:
-                search_queries = [user_input]
+                logger.warning("[Thinking Mode] No search queries generated")
+                return ""
 
-            # Limit to configured depth
-            search_queries = search_queries[:depth]
+            # Perform web searches
+            total_queries = len(search_queries)
 
-            if self.config.verbose:
-                logger.info(f"[Thinking Mode] Generated {len(search_queries)} research queries")
-
-            # Perform web searches for each query
             for i, query in enumerate(search_queries, 1):
-                if self.config.verbose:
-                    logger.info(f"[Thinking Mode] Research query {i}/{len(search_queries)}: {query}")
+                search_result = self._perform_single_search(query, i, total_queries)
 
-                try:
-                    # Perform web search
-                    search_results = web_search(
-                        query,
-                        num_results=self.config.thinking_web_search_results
-                    )
+                if search_result:
+                    successful_searches += 1
+                    research_context.append(f"\n=== Research Query {i}: {query} ===\n")
+                    research_context.append(search_result)
+                else:
+                    failed_searches += 1
 
-                    if search_results:
-                        research_context.append(f"\n=== Research Query {i}: {query} ===\n")
-                        research_context.append(search_results)
-
-                        if self.config.verbose:
-                            logger.info(f"[Thinking Mode] Gathered {len(search_results)} chars of context")
-
-                except Exception as e:
-                    logger.warning(f"[Thinking Mode] Search failed for query '{query}': {e}")
-                    if self.config.stop_on_error:
-                        raise
-
-            # Compile research context
+            # Compile and truncate research context
             if research_context:
                 full_context = "\n".join(research_context)
 
+                # Truncate if too long
+                full_context = self._truncate_context(full_context)
+
+                elapsed = time.time() - start_time
+
                 if self.config.verbose:
-                    logger.info(f"[Thinking Mode] Research complete: {len(full_context)} total characters")
+                    logger.info(
+                        f"[Thinking Mode] Research complete in {elapsed:.2f}s: "
+                        f"{len(full_context)} chars, "
+                        f"{successful_searches} successful, "
+                        f"{failed_searches} failed"
+                    )
 
                 return full_context
             else:
-                logger.warning("[Thinking Mode] No research context gathered")
+                logger.warning("[Thinking Mode] No research context gathered from any source")
                 return ""
 
         except Exception as e:
             logger.error(f"[Thinking Mode] Research failed: {e}", exc_info=True)
             if self.config.stop_on_error:
-                raise
+                raise ToolExecutionError(
+                    f"Thinking mode research failed: {str(e)}",
+                    "thinking_research"
+                )
             return ""
 
     def _build_messages(self, user_input: str) -> List[Dict[str, str]]:

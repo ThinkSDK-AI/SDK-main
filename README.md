@@ -289,6 +289,18 @@ Thinking Mode automatically:
 
 See [AGENT.md](AGENT.md) for complete documentation and advanced examples.
 
+**Production-Grade Features:**
+
+Thinking Mode includes enterprise-ready features:
+- ✅ **Input sanitization**: Automatic query validation and cleaning
+- ✅ **Rate limiting**: Built-in delays prevent API abuse
+- ✅ **Context management**: Automatic truncation prevents token limits
+- ✅ **Error resilience**: Graceful degradation with partial results
+- ✅ **Performance monitoring**: Detailed timing and success metrics
+- ✅ **Configuration validation**: Auto-correction of invalid parameters
+
+See [PRODUCTION_FEATURES.md](PRODUCTION_FEATURES.md) for comprehensive production features documentation.
+
 ### Model Context Protocol (MCP)
 
 FourierSDK includes comprehensive support for the Model Context Protocol (MCP), allowing you to connect your agents and applications to external tools and data sources through a standardized protocol.

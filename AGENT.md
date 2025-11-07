@@ -459,6 +459,22 @@ response = agent.run("Research AI trends and analyze the data")
 
 See `examples/thinking_mode_example.py` for complete working examples.
 
+**Production-Grade Thinking Mode:**
+
+Thinking Mode includes enterprise-ready features for production deployments:
+
+- **Input Sanitization**: All queries are validated, sanitized, and length-checked
+- **Rate Limiting**: Automatic 1-second delays between searches prevent API abuse
+- **Context Management**: Results truncated at 50,000 characters to prevent token limits
+- **Error Handling**: Graceful degradation with partial results on failures
+- **Metrics Tracking**: Detailed timing, success rates, and performance logs
+- **Configuration Validation**: Invalid parameters auto-corrected with warnings
+- **Security**: Protection against XSS, injection, and resource exhaustion attacks
+
+For detailed information on production features, see [PRODUCTION_FEATURES.md](PRODUCTION_FEATURES.md).
+
+For comprehensive test coverage, see `tests/test_thinking_mode.py` (40+ unit tests).
+
 ## Examples
 
 ### Example 1: Calculator Agent
