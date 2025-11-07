@@ -1,6 +1,6 @@
 # FourierSDK
 
-A Python SDK for accessing Large Language Models (LLMs) from various inference providers like Groq, Together AI, OpenAI, Anthropic, Perplexity, and Nebius. FourierSDK provides a unified interface similar to the OpenAI SDK while adding support for function calling, internet search, and multiple providers with standardized response formats.
+A Python SDK for accessing Large Language Models (LLMs) from various inference providers like Groq, Together AI, OpenAI, Anthropic, Perplexity, and Nebius. FourierSDK provides a unified interface similar to the OpenAI SDK while adding support for function calling, internet search, autonomous agents, and multiple providers with standardized response formats.
 
 ## Table of Contents
 
@@ -12,6 +12,7 @@ A Python SDK for accessing Large Language Models (LLMs) from various inference p
   - [Quick Start](#quick-start)
   - [Function Calling](#function-calling)
   - [Internet Search](#internet-search)
+  - [Autonomous Agents](#autonomous-agents)
   - [Provider-Specific Examples](#provider-specific-examples)
 - [Features](#features)
 - [API Reference](#api-reference)
@@ -188,6 +189,72 @@ response = client.chat(
 )
 ```
 
+### Autonomous Agents
+
+FourierSDK includes a powerful Agent framework for creating autonomous agents that can use tools, manage conversations, and execute complex workflows automatically.
+
+```python
+from fourier import Fourier
+from agent import Agent, AgentConfig
+import os
+
+# Create Fourier client
+client = Fourier(api_key=os.getenv("GROQ_API_KEY"), provider="groq")
+
+# Create an agent
+agent = Agent(
+    client=client,
+    name="MathAssistant",
+    system_prompt="You are a helpful math assistant. Use tools when needed.",
+    model="mixtral-8x7b-32768",
+    config=AgentConfig(verbose=True, return_intermediate_steps=True)
+)
+
+# Define and register a tool
+def calculator(operation: str, a: float, b: float) -> float:
+    """Perform arithmetic operations."""
+    if operation == "add":
+        return a + b
+    elif operation == "multiply":
+        return a * b
+    return 0
+
+agent.register_tool(
+    name="calculator",
+    description="Perform arithmetic operations: add, subtract, multiply, divide",
+    parameters={
+        "type": "object",
+        "properties": {
+            "operation": {"type": "string", "enum": ["add", "multiply"]},
+            "a": {"type": "number"},
+            "b": {"type": "number"}
+        }
+    },
+    required=["operation", "a", "b"],
+    function=calculator
+)
+
+# Run the agent - it will automatically use tools as needed
+response = agent.run("What is 25 times 4, then add 10?")
+
+print(f"Answer: {response['output']}")
+print(f"Tool calls made: {response['tool_calls']}")
+print(f"Iterations: {response['iterations']}")
+
+# View intermediate steps
+for step in response['intermediate_steps']:
+    print(f"Step: {step['tool']}({step['parameters']}) = {step['result']}")
+```
+
+**Key Agent Features:**
+- **Automatic Tool Execution**: Agents automatically execute tools when the LLM requests them
+- **Conversation Memory**: Maintains context across multiple interactions
+- **Configurable Behavior**: Control iterations, error handling, verbosity, and more
+- **Intermediate Steps**: Track what tools were used and when
+- **Error Resilience**: Continue execution even when tools fail
+
+See [AGENT.md](AGENT.md) for complete documentation and advanced examples.
+
 ### Provider-Specific Examples
 
 #### OpenAI
@@ -253,11 +320,14 @@ print(response["response"]["output"])
 - **Standardized Response Format**: Consistent response structure regardless of the provider
 - **Function Calling**: Define and use functions/tools with JSON schema validation
 - **Internet Search**: Augment LLM responses with up-to-date information from the web
+- **Autonomous Agents**: Create agents that automatically use tools and manage conversations
+- **Conversation Management**: Built-in conversation history and context management
 - **Customizable Base URLs**: For enterprise deployments or custom endpoints
 - **Token Usage Tracking**: Monitor token consumption across providers
 - **Type Hints**: Full type annotations for better IDE support
 - **Error Handling**: Comprehensive exception hierarchy for precise error handling
 - **Logging**: Production-ready logging framework
+- **Configurable Behavior**: Fine-tune agent iterations, timeouts, and error handling
 
 ## API Reference
 

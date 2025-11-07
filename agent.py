@@ -1,0 +1,503 @@
+"""
+Agent framework for FourierSDK.
+
+This module provides an Agent class that enables autonomous agent behavior
+with automatic tool execution, conversation management, and response handling.
+"""
+
+from typing import List, Dict, Any, Optional, Callable, Union
+from dataclasses import dataclass, field
+import logging
+import json
+from fourier import Fourier
+from models import Tool
+from exceptions import ToolExecutionError, InvalidRequestError
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class AgentConfig:
+    """Configuration for Agent behavior."""
+
+    max_iterations: int = 10
+    """Maximum number of tool execution iterations before stopping."""
+
+    max_tool_calls_per_iteration: int = 5
+    """Maximum number of tool calls in a single iteration."""
+
+    auto_execute_tools: bool = True
+    """Whether to automatically execute tools when requested by the LLM."""
+
+    require_tool_confirmation: bool = False
+    """Whether to require confirmation before executing tools."""
+
+    verbose: bool = False
+    """Whether to print detailed execution logs."""
+
+    temperature: float = 0.7
+    """Default temperature for LLM requests."""
+
+    max_tokens: Optional[int] = None
+    """Default max tokens for LLM requests."""
+
+    stop_on_error: bool = False
+    """Whether to stop execution on tool errors or continue."""
+
+    return_intermediate_steps: bool = False
+    """Whether to return intermediate steps in the response."""
+
+    timeout_seconds: Optional[int] = None
+    """Maximum execution time in seconds (None for no limit)."""
+
+
+class Agent:
+    """
+    Autonomous agent that manages tools, executes them, and maintains conversation state.
+
+    The Agent class provides a high-level interface for creating autonomous agents
+    that can use tools, manage conversations, and execute complex workflows.
+
+    Example:
+        >>> from fourier import Fourier
+        >>> from agent import Agent
+        >>>
+        >>> # Create client
+        >>> client = Fourier(api_key="...", provider="groq")
+        >>>
+        >>> # Create agent
+        >>> agent = Agent(
+        ...     client=client,
+        ...     name="MathAssistant",
+        ...     system_prompt="You are a helpful math assistant.",
+        ...     model="mixtral-8x7b-32768"
+        ... )
+        >>>
+        >>> # Register a tool
+        >>> def calculator(operation: str, a: float, b: float) -> float:
+        ...     if operation == "add": return a + b
+        ...     elif operation == "multiply": return a * b
+        ...     return 0
+        >>>
+        >>> agent.register_tool(
+        ...     name="calculator",
+        ...     description="Perform arithmetic operations",
+        ...     parameters={
+        ...         "type": "object",
+        ...         "properties": {
+        ...             "operation": {"type": "string", "enum": ["add", "multiply"]},
+        ...             "a": {"type": "number"},
+        ...             "b": {"type": "number"}
+        ...         }
+        ...     },
+        ...     required=["operation", "a", "b"],
+        ...     function=calculator
+        ... )
+        >>>
+        >>> # Execute agent
+        >>> response = agent.run("What is 25 times 4?")
+        >>> print(response["output"])
+    """
+
+    def __init__(
+        self,
+        client: Fourier,
+        name: str = "Agent",
+        system_prompt: Optional[str] = None,
+        model: str = "mixtral-8x7b-32768",
+        config: Optional[AgentConfig] = None,
+        **kwargs
+    ):
+        """
+        Initialize the Agent.
+
+        Args:
+            client: FourierSDK client instance
+            name: Name of the agent (for logging/debugging)
+            system_prompt: System prompt that defines the agent's behavior
+            model: Default model to use for chat completions
+            config: Agent configuration (uses defaults if not provided)
+            **kwargs: Additional arguments passed to chat completions
+        """
+        self.client = client
+        self.name = name
+        self.model = model
+        self.config = config or AgentConfig()
+        self.kwargs = kwargs
+
+        # Initialize system prompt
+        self.system_prompt = system_prompt or self._default_system_prompt()
+
+        # Tool management
+        self.tools: Dict[str, Tool] = {}
+        self.tool_functions: Dict[str, Callable] = {}
+
+        # Conversation state
+        self.conversation_history: List[Dict[str, str]] = []
+        self.intermediate_steps: List[Dict[str, Any]] = []
+
+        logger.info(f"Initialized agent: {self.name}")
+
+    def _default_system_prompt(self) -> str:
+        """Generate default system prompt."""
+        return (
+            f"You are {self.name}, a helpful AI assistant. "
+            "When you need to use a tool, respond with the exact format requested. "
+            "Be precise and follow instructions carefully."
+        )
+
+    def register_tool(
+        self,
+        name: str,
+        description: str,
+        parameters: Dict[str, Any],
+        function: Callable,
+        required: Optional[List[str]] = None
+    ) -> None:
+        """
+        Register a tool with the agent.
+
+        Args:
+            name: Name of the tool
+            description: Description of what the tool does
+            parameters: JSON Schema describing the tool's parameters
+            function: Python function that implements the tool
+            required: List of required parameter names
+
+        Example:
+            >>> def search_web(query: str) -> str:
+            ...     return f"Results for: {query}"
+            >>>
+            >>> agent.register_tool(
+            ...     name="search",
+            ...     description="Search the web",
+            ...     parameters={
+            ...         "type": "object",
+            ...         "properties": {
+            ...             "query": {"type": "string"}
+            ...         }
+            ...     },
+            ...     required=["query"],
+            ...     function=search_web
+            ... )
+        """
+        tool = self.client.create_tool(
+            name=name,
+            description=description,
+            parameters=parameters,
+            required=required or []
+        )
+
+        self.tools[name] = tool
+        self.tool_functions[name] = function
+
+        if self.config.verbose:
+            logger.info(f"Registered tool: {name}")
+
+    def execute_tool(self, tool_name: str, parameters: Dict[str, Any]) -> Any:
+        """
+        Execute a registered tool.
+
+        Args:
+            tool_name: Name of the tool to execute
+            parameters: Parameters to pass to the tool
+
+        Returns:
+            Result of the tool execution
+
+        Raises:
+            ToolExecutionError: If tool execution fails
+        """
+        if tool_name not in self.tool_functions:
+            raise ToolExecutionError(
+                f"Tool '{tool_name}' not registered",
+                tool_name
+            )
+
+        try:
+            if self.config.verbose:
+                logger.info(f"Executing tool: {tool_name} with params: {parameters}")
+
+            result = self.tool_functions[tool_name](**parameters)
+
+            if self.config.verbose:
+                logger.info(f"Tool result: {result}")
+
+            return result
+
+        except Exception as e:
+            error_msg = f"Error executing tool '{tool_name}': {str(e)}"
+            logger.error(error_msg, exc_info=True)
+
+            if self.config.stop_on_error:
+                raise ToolExecutionError(error_msg, tool_name) from e
+
+            return f"Error: {str(e)}"
+
+    def _format_tool_result_message(
+        self,
+        tool_name: str,
+        tool_parameters: Dict[str, Any],
+        result: Any
+    ) -> str:
+        """
+        Format tool execution result as a message for the LLM.
+
+        Args:
+            tool_name: Name of the tool that was executed
+            tool_parameters: Parameters used for the tool
+            result: Result from the tool execution
+
+        Returns:
+            Formatted message string
+        """
+        return (
+            f"Tool '{tool_name}' was executed with parameters {json.dumps(tool_parameters)}. "
+            f"Result: {result}"
+        )
+
+    def _build_messages(self, user_input: str) -> List[Dict[str, str]]:
+        """
+        Build the messages array for the LLM request.
+
+        Args:
+            user_input: The user's input/query
+
+        Returns:
+            List of message dictionaries
+        """
+        messages = []
+
+        # Add system prompt
+        if self.system_prompt:
+            messages.append({
+                "role": "system",
+                "content": self.system_prompt
+            })
+
+        # Add conversation history
+        messages.extend(self.conversation_history)
+
+        # Add current user input if not already in history
+        if not self.conversation_history or self.conversation_history[-1].get("content") != user_input:
+            messages.append({
+                "role": "user",
+                "content": user_input
+            })
+
+        return messages
+
+    def run(
+        self,
+        user_input: str,
+        reset_history: bool = True,
+        **override_kwargs
+    ) -> Dict[str, Any]:
+        """
+        Run the agent with the given input.
+
+        This method executes the agent's main loop:
+        1. Send user input to LLM
+        2. If LLM requests tool use, execute the tool
+        3. Send tool result back to LLM
+        4. Repeat until final answer or max iterations
+
+        Args:
+            user_input: The user's input/query
+            reset_history: Whether to reset conversation history before running
+            **override_kwargs: Override default kwargs for this run
+
+        Returns:
+            Dictionary containing:
+                - output: Final response from the agent
+                - iterations: Number of iterations taken
+                - tool_calls: Number of tools called
+                - intermediate_steps: List of intermediate steps (if enabled)
+                - success: Whether execution completed successfully
+
+        Example:
+            >>> response = agent.run("Calculate 15 + 27")
+            >>> print(response["output"])
+            >>> print(f"Used {response['tool_calls']} tool calls")
+        """
+        if reset_history:
+            self.conversation_history = []
+            self.intermediate_steps = []
+
+        # Merge kwargs
+        request_kwargs = {**self.kwargs, **override_kwargs}
+
+        # Build initial messages
+        messages = self._build_messages(user_input)
+
+        # Track execution
+        iterations = 0
+        total_tool_calls = 0
+
+        if self.config.verbose:
+            logger.info(f"Starting agent run for: {user_input[:100]}...")
+
+        while iterations < self.config.max_iterations:
+            iterations += 1
+
+            if self.config.verbose:
+                logger.info(f"Iteration {iterations}/{self.config.max_iterations}")
+
+            try:
+                # Make request to LLM
+                response = self.client.chat(
+                    model=self.model,
+                    messages=messages,
+                    tools=list(self.tools.values()) if self.tools else None,
+                    temperature=self.config.temperature,
+                    max_tokens=self.config.max_tokens,
+                    **request_kwargs
+                )
+
+                # Check response type
+                response_type = response.get("metadata", {}).get("response_type")
+
+                if response_type == "tool_call" and self.config.auto_execute_tools:
+                    # Extract tool information
+                    tool_name = response.get("response", {}).get("tool_used")
+                    tool_params = response.get("response", {}).get("tool_parameters", {})
+
+                    if not tool_name:
+                        # No tool in response, treat as final answer
+                        break
+
+                    total_tool_calls += 1
+
+                    if self.config.verbose:
+                        logger.info(f"LLM requested tool: {tool_name}")
+
+                    # Execute the tool
+                    tool_result = self.execute_tool(tool_name, tool_params)
+
+                    # Record intermediate step
+                    if self.config.return_intermediate_steps:
+                        self.intermediate_steps.append({
+                            "iteration": iterations,
+                            "tool": tool_name,
+                            "parameters": tool_params,
+                            "result": tool_result
+                        })
+
+                    # Format tool result message
+                    tool_message = self._format_tool_result_message(
+                        tool_name,
+                        tool_params,
+                        tool_result
+                    )
+
+                    # Add to conversation history
+                    self.conversation_history.append({
+                        "role": "assistant",
+                        "content": f"I need to use the {tool_name} tool."
+                    })
+                    self.conversation_history.append({
+                        "role": "user",
+                        "content": tool_message
+                    })
+
+                    # Rebuild messages for next iteration
+                    messages = self._build_messages(user_input)
+
+                else:
+                    # Got final answer
+                    output = response.get("response", {}).get("output", "")
+
+                    # Add to conversation history
+                    self.conversation_history.append({
+                        "role": "user",
+                        "content": user_input
+                    })
+                    self.conversation_history.append({
+                        "role": "assistant",
+                        "content": output
+                    })
+
+                    if self.config.verbose:
+                        logger.info("Agent completed successfully")
+
+                    return {
+                        "output": output,
+                        "iterations": iterations,
+                        "tool_calls": total_tool_calls,
+                        "intermediate_steps": self.intermediate_steps if self.config.return_intermediate_steps else [],
+                        "success": True,
+                        "response": response
+                    }
+
+            except Exception as e:
+                logger.error(f"Error in agent iteration {iterations}: {e}", exc_info=True)
+
+                if self.config.stop_on_error:
+                    return {
+                        "output": f"Agent error: {str(e)}",
+                        "iterations": iterations,
+                        "tool_calls": total_tool_calls,
+                        "intermediate_steps": self.intermediate_steps if self.config.return_intermediate_steps else [],
+                        "success": False,
+                        "error": str(e)
+                    }
+
+                # Continue on error
+                continue
+
+        # Max iterations reached
+        logger.warning(f"Agent reached max iterations ({self.config.max_iterations})")
+
+        return {
+            "output": "Maximum iterations reached without final answer.",
+            "iterations": iterations,
+            "tool_calls": total_tool_calls,
+            "intermediate_steps": self.intermediate_steps if self.config.return_intermediate_steps else [],
+            "success": False,
+            "error": "max_iterations_reached"
+        }
+
+    def reset(self) -> None:
+        """Reset the agent's conversation history and intermediate steps."""
+        self.conversation_history = []
+        self.intermediate_steps = []
+
+        if self.config.verbose:
+            logger.info("Agent state reset")
+
+    def update_system_prompt(self, new_prompt: str) -> None:
+        """
+        Update the agent's system prompt.
+
+        Args:
+            new_prompt: New system prompt to use
+        """
+        self.system_prompt = new_prompt
+
+        if self.config.verbose:
+            logger.info("System prompt updated")
+
+    def get_conversation_history(self) -> List[Dict[str, str]]:
+        """
+        Get the current conversation history.
+
+        Returns:
+            List of message dictionaries
+        """
+        return self.conversation_history.copy()
+
+    def add_to_history(self, role: str, content: str) -> None:
+        """
+        Manually add a message to conversation history.
+
+        Args:
+            role: Message role ('user', 'assistant', or 'system')
+            content: Message content
+        """
+        if role not in ["user", "assistant", "system"]:
+            raise InvalidRequestError(f"Invalid role: {role}")
+
+        self.conversation_history.append({
+            "role": role,
+            "content": content
+        })
