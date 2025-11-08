@@ -16,7 +16,8 @@ from providers import (
     NebiusProvider,
     OpenAIProvider,
     AnthropicProvider,
-    PerplexityProvider
+    PerplexityProvider,
+    BedrockProvider
 )
 from response_normalizer import ResponseNormalizer
 from web_search import WebSearch
@@ -49,18 +50,28 @@ class Fourier:
         Initialize the Fourier SDK client.
 
         Args:
-            api_key: API key for the LLM provider
+            api_key: API key for the LLM provider (not required for Bedrock with IAM)
             provider: Name of the LLM provider (default: "groq")
-                     Supported: groq, together, nebius, openai, anthropic, perplexity
+                     Supported: groq, together, nebius, openai, anthropic, perplexity, bedrock
             base_url: Custom base URL for the API (optional)
             **provider_kwargs: Additional provider-specific arguments
+                              For Bedrock:
+                                - access_key: AWS access key ID
+                                - secret_key: AWS secret access key
+                                - region: AWS region (default: us-east-1)
+                                - profile_name: AWS profile name
+                                - use_cross_region: Enable cross-region inference
+                                - use_global_inference: Use global inference profiles
+                                - inference_profile_id: Specific inference profile ID
 
         Raises:
-            InvalidAPIKeyError: If API key is empty or invalid
+            InvalidAPIKeyError: If API key is empty or invalid (except for Bedrock with IAM)
             UnsupportedProviderError: If provider is not supported
         """
-        if not api_key or not api_key.strip():
-            raise InvalidAPIKeyError("API key cannot be empty")
+        # Bedrock can use IAM credentials instead of API key
+        if provider.lower() != "bedrock":
+            if not api_key or not api_key.strip():
+                raise InvalidAPIKeyError("API key cannot be empty")
 
         self.api_key = api_key
         self.provider = provider
@@ -73,7 +84,8 @@ class Fourier:
             "nebius": NebiusProvider,
             "openai": OpenAIProvider,
             "anthropic": AnthropicProvider,
-            "perplexity": PerplexityProvider
+            "perplexity": PerplexityProvider,
+            "bedrock": BedrockProvider
         }
 
         provider_class = provider_map.get(provider.lower())
@@ -84,7 +96,15 @@ class Fourier:
                 f"Supported providers: {supported}"
             )
 
-        self.provider_instance = provider_class(api_key, **provider_kwargs)
+        # Bedrock has special initialization
+        if provider.lower() == "bedrock":
+            # For Bedrock, api_key is optional (can use IAM credentials)
+            self.provider_instance = provider_class(
+                api_key=api_key if api_key and api_key.strip() else None,
+                **provider_kwargs
+            )
+        else:
+            self.provider_instance = provider_class(api_key, **provider_kwargs)
         if base_url:
             self.provider_instance.BASE_URL = base_url
 
@@ -198,14 +218,23 @@ class Fourier:
                 }
                 payload["messages"].insert(0, system_message)
 
-        # Make the API request using the provider's endpoint and headers
+        # Make the API request - Bedrock uses boto3, others use HTTP
         try:
-            response = requests.post(
-                self.provider_instance.get_chat_completion_endpoint(),
-                json=payload,
-                headers=self.provider_instance.headers
-            )
-            response.raise_for_status()
+            if self.provider.lower() == "bedrock":
+                # Bedrock uses boto3 SDK instead of HTTP requests
+                raw_response = self.provider_instance.chat_completion(request)
+                # Process the Bedrock response to standardized format
+                raw_response = self.provider_instance.process_response(raw_response)
+            else:
+                # Standard HTTP request for other providers
+                response = requests.post(
+                    self.provider_instance.get_chat_completion_endpoint(),
+                    json=payload,
+                    headers=self.provider_instance.headers
+                )
+                response.raise_for_status()
+                # Get the raw response
+                raw_response = response.json()
         except requests.HTTPError as e:
             status_code = e.response.status_code if e.response else None
             error_msg = str(e)
@@ -219,9 +248,10 @@ class Fourier:
         except requests.RequestException as e:
             logger.error(f"Network error when calling {self.provider} API: {e}", exc_info=True)
             raise ProviderAPIError(f"Network error: {str(e)}", self.provider) from e
-
-        # Get the raw response
-        raw_response = response.json()
+        except Exception as e:
+            # Handle Bedrock-specific errors and other exceptions
+            logger.error(f"Error when calling {self.provider} API: {e}", exc_info=True)
+            raise ProviderAPIError(f"API error: {str(e)}", self.provider) from e
 
         # Use the ResponseNormalizer to create standardized JSON response
         standardized_response = ResponseNormalizer.normalize(raw_response, self.provider)

@@ -1,6 +1,6 @@
 # FourierSDK
 
-A Python SDK for accessing Large Language Models (LLMs) from various inference providers like Groq, Together AI, OpenAI, Anthropic, Perplexity, and Nebius. FourierSDK provides a unified interface similar to the OpenAI SDK while adding support for function calling, internet search, autonomous agents, and multiple providers with standardized response formats.
+A Python SDK for accessing Large Language Models (LLMs) from various inference providers like Groq, Together AI, OpenAI, Anthropic, Perplexity, Nebius, and AWS Bedrock. FourierSDK provides a unified interface similar to the OpenAI SDK while adding support for function calling, internet search, autonomous agents, and multiple providers with standardized response formats.
 
 ## Table of Contents
 
@@ -54,6 +54,7 @@ FourierSDK supports multiple LLM providers, each requiring its own API key:
 - **Anthropic**: Get an API key from [Anthropic](https://console.anthropic.com/)
 - **Perplexity**: Get an API key from [Perplexity](https://www.perplexity.ai/)
 - **Nebius**: Get an API key from [Nebius](https://nebius.ai/)
+- **AWS Bedrock**: Configure AWS credentials (see [Bedrock Documentation](BEDROCK.md))
 
 ### Environment Variables
 
@@ -67,6 +68,11 @@ OPENAI_API_KEY=your_openai_api_key_here
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
 PERPLEXITY_API_KEY=your_perplexity_api_key_here
 NEBIUS_API_KEY=your_nebius_api_key_here
+
+# AWS Bedrock Configuration (optional)
+AWS_ACCESS_KEY_ID=your_aws_access_key_here
+AWS_SECRET_ACCESS_KEY=your_aws_secret_key_here
+AWS_REGION=us-east-1
 ```
 
 **Important**: Never commit your `.env` file to version control. It's already added to `.gitignore`.
@@ -548,9 +554,75 @@ response = client.chat(
 print(response["response"]["output"])
 ```
 
+#### AWS Bedrock
+
+```python
+from fourier import Fourier
+import os
+
+# Option 1: Using IAM credentials
+client = Fourier(
+    api_key=None,  # Not needed for IAM
+    provider="bedrock",
+    access_key=os.getenv("AWS_ACCESS_KEY_ID"),
+    secret_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+    region="us-east-1"
+)
+
+# Option 2: Using AWS profile
+client = Fourier(
+    api_key=None,
+    provider="bedrock",
+    profile_name="default",
+    region="us-east-1"
+)
+
+# Option 3: Default credential chain
+client = Fourier(
+    api_key=None,
+    provider="bedrock",
+    region="us-east-1"
+)
+
+# Basic usage
+response = client.chat(
+    model="claude-3-5-sonnet",  # or "anthropic.claude-3-5-sonnet-20241022-v2:0"
+    messages=[
+        {"role": "user", "content": "Explain serverless computing"}
+    ],
+    max_tokens=500
+)
+
+print(response["response"]["content"])
+
+# Advanced: Cross-region inference
+client = Fourier(
+    api_key=None,
+    provider="bedrock",
+    region="us-east-1",
+    use_cross_region=True  # High availability
+)
+
+# Advanced: Global inference profiles
+client = Fourier(
+    api_key=None,
+    provider="bedrock",
+    region="us-east-1",
+    use_global_inference=True
+)
+```
+
+**See [BEDROCK.md](BEDROCK.md) for complete Bedrock documentation, including:**
+- All authentication methods
+- 40+ supported models (Claude, Llama, Mistral, Titan, Cohere, AI21)
+- Cross-region and global inference
+- Tool calling with Bedrock
+- Agent framework integration
+- Complete examples
+
 ## Features
 
-- **Multi-Provider Support**: Easily switch between Groq, Together AI, OpenAI, Anthropic, Perplexity, and Nebius
+- **Multi-Provider Support**: Easily switch between Groq, Together AI, OpenAI, Anthropic, Perplexity, Nebius, and AWS Bedrock
 - **Standardized Response Format**: Consistent response structure regardless of the provider
 - **Command Line Interface (CLI)**: Comprehensive CLI for managing agents and MCP tools without writing code
 - **Function Calling**: Define and use functions/tools with JSON schema validation
@@ -587,8 +659,8 @@ Fourier(
 ```
 
 **Parameters:**
-- `api_key`: API key for the LLM provider
-- `provider`: Provider name (default: "groq"). Supported: groq, together, nebius, openai, anthropic, perplexity
+- `api_key`: API key for the LLM provider (not required for Bedrock with IAM)
+- `provider`: Provider name (default: "groq"). Supported: groq, together, nebius, openai, anthropic, perplexity, bedrock
 - `base_url`: Custom base URL for the API (optional)
 - `**provider_kwargs`: Additional provider-specific arguments
 
