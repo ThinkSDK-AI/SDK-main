@@ -4,6 +4,7 @@ from providers.nebius import NebiusProvider
 from providers.openai import OpenAIProvider
 from providers.anthropic import AnthropicProvider
 from providers.perplexity import PerplexityProvider
+from providers.bedrock import BedrockProvider
 
 __all__ = [
     'GroqProvider',
@@ -12,5 +13,6 @@ __all__ = [
     'OpenRouterProvider',
     'OpenAIProvider',
     'AnthropicProvider',
-    'PerplexityProvider'
+    'PerplexityProvider',
+    'BedrockProvider'
 ] 

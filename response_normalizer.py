@@ -34,6 +34,7 @@ class ResponseNormalizer:
             "groq": ResponseNormalizer._normalize_groq_response,
             "together": ResponseNormalizer._normalize_together_response,
             "nebius": ResponseNormalizer._normalize_nebius_response,
+            "bedrock": ResponseNormalizer._normalize_bedrock_response,
         }
         
         # Get the appropriate normalizer function for this provider
@@ -359,7 +360,62 @@ class ResponseNormalizer:
         """Normalize Nebius response"""
         # Based on actual response format, similar to other providers
         return ResponseNormalizer._normalize_together_response(response)
-    
+
+    @staticmethod
+    def _normalize_bedrock_response(response: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize AWS Bedrock response"""
+        try:
+            # Bedrock responses are already processed by the provider
+            # They come in a standardized format from BedrockProvider.process_response()
+            if "choices" in response and len(response["choices"]) > 0:
+                choice = response["choices"][0]
+                message = choice.get("message", {})
+                content = message.get("content", "")
+
+                # Check for tool calls
+                if "tool_calls" in message and message["tool_calls"]:
+                    tool_call = message["tool_calls"][0]
+                    function = tool_call.get("function", {})
+
+                    try:
+                        parameters = json.loads(function.get("arguments", "{}"))
+                    except json.JSONDecodeError:
+                        parameters = {}
+
+                    return {
+                        "content": content,
+                        "tool": function.get("name", ""),
+                        "parameters": parameters,
+                        "is_tool_response": True,
+                        "raw_response": response,
+                        "model": response.get("model", ""),
+                        "request_id": response.get("id", ""),
+                        "usage": {
+                            "input_tokens": response.get("usage", {}).get("prompt_tokens", 0),
+                            "output_tokens": response.get("usage", {}).get("completion_tokens", 0),
+                            "total_tokens": response.get("usage", {}).get("total_tokens", 0)
+                        }
+                    }
+
+                # Standard text response
+                return {
+                    "content": content,
+                    "is_tool_response": False,
+                    "raw_response": response,
+                    "model": response.get("model", ""),
+                    "request_id": response.get("id", ""),
+                    "usage": {
+                        "input_tokens": response.get("usage", {}).get("prompt_tokens", 0),
+                        "output_tokens": response.get("usage", {}).get("completion_tokens", 0),
+                        "total_tokens": response.get("usage", {}).get("total_tokens", 0)
+                    }
+                }
+        except Exception as e:
+            logger.error(f"Error normalizing Bedrock response: {e}", exc_info=True)
+
+        # Return original response if normalization fails
+        return response
+
     @staticmethod
     def _normalize_generic_response(response: Dict[str, Any]) -> Dict[str, Any]:
         """Generic response normalizer for providers without specific handling"""
