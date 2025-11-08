@@ -13,6 +13,7 @@ from web_search import WebSearch
 from agent import Agent, AgentConfig
 from assistant import Assistant, AssistantConfig
 from workflow import Workflow, WorkflowNode, NodeType, ExecutionStatus
+from config import FourierConfig, get_config, tool, ResourceRegistry, FourierPaths
 
 __version__ = "0.2.0"
 
@@ -30,4 +31,9 @@ __all__ = [
     "WorkflowNode",
     "NodeType",
     "ExecutionStatus",
+    "FourierConfig",
+    "get_config",
+    "tool",
+    "ResourceRegistry",
+    "FourierPaths",
 ]

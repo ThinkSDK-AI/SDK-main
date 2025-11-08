@@ -10,6 +10,7 @@ A Python SDK for accessing Large Language Models (LLMs) from various inference p
   - [Environment Variables](#environment-variables)
 - [Usage](#usage)
   - [Quick Start](#quick-start)
+  - [Config System (Recommended)](#config-system-recommended)
   - [Command Line Interface (CLI)](#command-line-interface-cli)
   - [Function Calling](#function-calling)
   - [Internet Search](#internet-search)
@@ -126,6 +127,62 @@ print(response["response"]["output"])
 usage = response.get("usage", {})
 print(f"Tokens: {usage.get('input_tokens', 0)} in / {usage.get('output_tokens', 0)} out")
 ```
+
+### Config System (Recommended)
+
+The Config System provides a **centralized way to manage agents, workflows, and tools** without importing them directly. Perfect for API integrations and large projects!
+
+#### Initialize Once
+
+```python
+# In your main.py or __init__.py
+from fourier.config import FourierConfig
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Initialize and auto-discover all resources
+config = FourierConfig(base_dir=".", auto_discover=True)
+```
+
+#### Use Anywhere
+
+```python
+# In any other module (API handler, message queue, etc.)
+from fourier.config import get_config
+
+# Invoke agent by name - no imports needed!
+config = get_config()
+response = config.invoke_agent("customer_support", query="Hello")
+
+# Use tools by name
+user_data = config.invoke_tool("fetch_user_data", user_id="123")
+
+# Run workflows by name
+result = config.invoke_workflow("onboarding", input_data={...})
+```
+
+#### Project Structure
+
+```
+my_project/
+├── main.py          # Initialize config here
+├── api.py           # Use get_config() here
+├── agents/          # Auto-discovered
+│   ├── support.py
+│   └── research.py
+├── tools/           # Auto-discovered
+│   └── data_tools.py
+└── workflows.py     # Auto-discovered
+```
+
+**Benefits:**
+- ✅ No import hell - invoke by name
+- ✅ Perfect for APIs and event handlers
+- ✅ Auto-discovery of resources
+- ✅ Clean architecture
+
+**See [CONFIG_SYSTEM.md](CONFIG_SYSTEM.md) for complete guide and [examples/user_project_example/](examples/user_project_example/) for working examples.**
 
 ### Command Line Interface (CLI)
 
