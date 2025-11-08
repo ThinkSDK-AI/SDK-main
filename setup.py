@@ -1,16 +1,43 @@
 from setuptools import setup, find_packages
 
+# Read base requirements
+with open("requirements-base.txt") as f:
+    base_requires = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+
+# Optional provider-specific dependencies
+extras_require = {
+    # AWS Bedrock provider
+    "bedrock": [
+        "boto3>=1.28.0",
+    ],
+
+    # Web search feature (used by all providers)
+    "search": [
+        "beautifulsoup4>=4.12.0",
+    ],
+
+    # All providers combined
+    "all": [
+        "boto3>=1.28.0",
+        "beautifulsoup4>=4.12.0",
+    ],
+
+    # Development dependencies
+    "dev": [
+        "pytest>=7.0.0",
+        "pytest-cov>=4.0.0",
+        "black>=23.0.0",
+        "flake8>=6.0.0",
+        "mypy>=1.0.0",
+    ],
+}
+
 setup(
     name="fourier-sdk",
-    version="0.1.0",
+    version="0.2.0",
     packages=find_packages(),
-    install_requires=[
-        "requests>=2.31.0",
-        "pydantic>=2.0.0",
-        "typing-extensions>=4.5.0",
-        "python-dotenv>=1.0.0",
-        "beautifulsoup4>=4.12.0"
-    ],
+    install_requires=base_requires,
+    extras_require=extras_require,
     author="Fourier AI",
     author_email="contact@fourier.ai",
     description="A unified Python SDK for accessing multiple LLM providers with standardized responses, function calling, and internet search capabilities",
@@ -23,4 +50,9 @@ setup(
         "Operating System :: OS Independent",
     ],
     python_requires=">=3.7",
+    entry_points={
+        "console_scripts": [
+            "fourier=cli:main",
+        ],
+    },
 )

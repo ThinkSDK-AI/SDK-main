@@ -23,24 +23,46 @@ A Python SDK for accessing Large Language Models (LLMs) from various inference p
 
 ## Installation
 
-1. Clone the repository:
+### Quick Start (All Features)
 
 ```bash
 git clone https://github.com/ThinkSDK-AI/SDK-main.git
 cd SDK-main
+pip install -e .[all]
+python setup_providers.py  # Interactive configuration
 ```
 
-2. Install the required dependencies:
+### Modular Installation (Recommended)
+
+Install only the providers you need:
 
 ```bash
-pip install -r requirements.txt
+git clone https://github.com/ThinkSDK-AI/SDK-main.git
+cd SDK-main
+
+# Base installation (Groq, OpenAI, Anthropic, Together, Perplexity, Nebius)
+pip install -e .
+
+# Add AWS Bedrock support
+pip install -e .[bedrock]
+
+# Add web search feature
+pip install -e .[search]
+
+# Run interactive setup
+python setup_providers.py
 ```
 
-Or install via pip (once published):
+### Installation Options
 
-```bash
-pip install fourier-sdk
-```
+| Command | Providers Included |
+|---------|-------------------|
+| `pip install -e .` | Base providers (no extra dependencies) |
+| `pip install -e .[bedrock]` | Base + AWS Bedrock |
+| `pip install -e .[search]` | Base + Web Search |
+| `pip install -e .[all]` | All features |
+
+**See [INSTALLATION.md](INSTALLATION.md) for detailed installation guide.**
 
 ## Setup
 

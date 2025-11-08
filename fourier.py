@@ -10,15 +10,7 @@ import requests
 import json
 import logging
 from models import ChatCompletionRequest, Tool
-from providers import (
-    GroqProvider,
-    TogetherProvider,
-    NebiusProvider,
-    OpenAIProvider,
-    AnthropicProvider,
-    PerplexityProvider,
-    BedrockProvider
-)
+from providers import get_available_providers, is_provider_available
 from response_normalizer import ResponseNormalizer
 from web_search import WebSearch
 from exceptions import (
@@ -77,23 +69,24 @@ class Fourier:
         self.provider = provider
         self.provider_kwargs = provider_kwargs
 
-        # Initialize the appropriate provider
-        provider_map = {
-            "groq": GroqProvider,
-            "together": TogetherProvider,
-            "nebius": NebiusProvider,
-            "openai": OpenAIProvider,
-            "anthropic": AnthropicProvider,
-            "perplexity": PerplexityProvider,
-            "bedrock": BedrockProvider
-        }
+        # Get available providers (based on installed dependencies)
+        provider_map = get_available_providers()
 
         provider_class = provider_map.get(provider.lower())
         if not provider_class:
+            # Check if provider exists but dependencies aren't installed
+            all_providers = ["groq", "together", "nebius", "openai", "anthropic", "perplexity", "bedrock"]
+            if provider.lower() in all_providers and provider.lower() not in provider_map:
+                install_cmd = f"pip install fourier-sdk[{provider.lower()}]"
+                raise UnsupportedProviderError(
+                    f"Provider '{provider}' requires additional dependencies. "
+                    f"Install with: {install_cmd}"
+                )
+
             supported = ", ".join(provider_map.keys())
             raise UnsupportedProviderError(
                 f"Unsupported provider: {provider}. "
-                f"Supported providers: {supported}"
+                f"Available providers: {supported}"
             )
 
         # Bedrock has special initialization

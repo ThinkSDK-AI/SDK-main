@@ -1,6 +1,11 @@
-requests>=2.31.0
-pydantic>=2.0.0
-typing-extensions>=4.5.0
-python-dotenv>=1.0.0
-beautifulsoup4>=4.12.0
-boto3>=1.28.0 
+# Base requirements (required for all providers)
+-r requirements-base.txt
+
+# Optional: Install all provider dependencies
+# Uncomment the line below or install with: pip install -e .[all]
+# -r requirements-providers.txt
+
+# To install specific providers:
+# pip install -e .[bedrock]  # For AWS Bedrock
+# pip install -e .[search]   # For web search feature
+# pip install -e .[all]      # For all optional features 

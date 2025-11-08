@@ -1,0 +1,7 @@
+# Optional provider-specific dependencies
+
+# AWS Bedrock
+boto3>=1.28.0
+
+# Web Search (for internet search feature)
+beautifulsoup4>=4.12.0
