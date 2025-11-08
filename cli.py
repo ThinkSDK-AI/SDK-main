@@ -62,6 +62,10 @@ Examples:
   # Quick chat
   python cli.py chat "What is quantum computing?"
 
+  # Initialize new project
+  python cli.py init
+  python cli.py init --name my_project --dir ./projects
+
   # Create agent with thinking mode
   python cli.py create-agent --name ResearchBot --thinking-mode
 
@@ -112,6 +116,28 @@ For more information, visit: https://github.com/Fourier-AI/SDK-main
         '--agent',
         type=str,
         help='Load specific agent in interactive mode'
+    )
+
+    # Init command
+    init_parser = subparsers.add_parser(
+        'init',
+        help='Initialize new Fourier project'
+    )
+    init_parser.add_argument(
+        '--name',
+        type=str,
+        help='Project name'
+    )
+    init_parser.add_argument(
+        '--dir',
+        type=str,
+        default='.',
+        help='Base directory for project creation (default: current directory)'
+    )
+    init_parser.add_argument(
+        '--non-interactive',
+        action='store_true',
+        help='Skip interactive prompts and use defaults'
     )
 
     # Chat command
@@ -657,6 +683,43 @@ def handle_config(args: argparse.Namespace, config_manager: ConfigManager) -> in
         return 1
 
 
+def handle_init(args: argparse.Namespace, config_manager: ConfigManager) -> int:
+    """
+    Handle project initialization.
+
+    Args:
+        args: Command line arguments
+        config_manager: Configuration manager instance
+
+    Returns:
+        Exit code (0 for success, 1 for failure)
+    """
+    try:
+        from init_project import initialize_project
+
+        print_header("Fourier Project Initialization")
+
+        success = initialize_project(
+            base_dir=args.dir,
+            interactive=not args.non_interactive
+        )
+
+        if success:
+            print_success("Project initialized successfully!")
+            return 0
+        else:
+            print_error("Project initialization cancelled or failed")
+            return 1
+
+    except ImportError:
+        print_error("init_project module not found. Make sure init_project.py is available.")
+        return 1
+    except Exception as e:
+        print_error(f"Error initializing project: {e}")
+        logger.exception("Init error")
+        return 1
+
+
 def main():
     """Main CLI entry point."""
     parser = setup_parser()
@@ -692,6 +755,7 @@ def main():
         'run': handle_run,
         'delete-agent': handle_delete_agent,
         'config': handle_config,
+        'init': handle_init,
     }
 
     handler = command_handlers.get(args.command)
